@@ -8,6 +8,7 @@ type ChiefAction = {
     | "request_report"
     | "run_technical_audit"
     | "run_prospect_audit"
+    | "link_github_repo"
     | "no_action";
   project_ref: string | null;
   project_type: "owned" | "client" | "lead_prospect" | null;
@@ -30,6 +31,7 @@ type ChiefAction = {
   schedule_status: "active" | "paused" | "cancelled" | null;
   report_format: "summary" | "document" | "presentation" | "task" | "email" | null;
   max_urls: number | null;
+  repo_full_name: string | null;
 };
 
 export type ChiefPlan = {
@@ -89,6 +91,7 @@ const actionSchema = {
     "schedule_status",
     "report_format",
     "max_urls",
+    "repo_full_name",
   ],
   properties: {
     type: {
@@ -102,6 +105,7 @@ const actionSchema = {
         "request_report",
         "run_technical_audit",
         "run_prospect_audit",
+        "link_github_repo",
         "no_action",
       ],
     },
@@ -149,6 +153,7 @@ const actionSchema = {
       enum: ["summary", "document", "presentation", "task", "email", null],
     },
     max_urls: { type: ["integer", "null"], minimum: 1, maximum: 500 },
+    repo_full_name: { type: ["string", "null"] },
   },
 };
 
