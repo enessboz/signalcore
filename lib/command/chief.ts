@@ -9,6 +9,7 @@ type ChiefAction = {
     | "run_technical_audit"
     | "run_prospect_audit"
     | "link_github_repo"
+    | "run_serp_research"
     | "no_action";
   project_ref: string | null;
   project_type: "owned" | "client" | "lead_prospect" | null;
@@ -32,6 +33,9 @@ type ChiefAction = {
   report_format: "summary" | "document" | "presentation" | "task" | "email" | null;
   max_urls: number | null;
   repo_full_name: string | null;
+  keywords: string[];
+  location_code: number | null;
+  language_code: string | null;
 };
 
 export type ChiefPlan = {
@@ -92,6 +96,9 @@ const actionSchema = {
     "report_format",
     "max_urls",
     "repo_full_name",
+    "keywords",
+    "location_code",
+    "language_code",
   ],
   properties: {
     type: {
@@ -106,6 +113,7 @@ const actionSchema = {
         "run_technical_audit",
         "run_prospect_audit",
         "link_github_repo",
+        "run_serp_research",
         "no_action",
       ],
     },
@@ -154,6 +162,9 @@ const actionSchema = {
     },
     max_urls: { type: ["integer", "null"], minimum: 1, maximum: 500 },
     repo_full_name: { type: ["string", "null"] },
+    keywords: { type: "array", maxItems: 10, items: { type: "string" } },
+    location_code: { type: ["integer", "null"] },
+    language_code: { type: ["string", "null"] },
   },
 };
 
