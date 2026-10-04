@@ -242,6 +242,39 @@ export async function processPerformanceQueue(input: {
   batchSize?: number;
 }) {
   const batchSize = Math.min(Math.max(Number(input.batchSize || 5), 1), 10);
+  const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+
+  const { data: staleRows, error: staleError } = await input.client
+    .from("crawl_performance_queue")
+    .select("id,attempts")
+    .eq("status", "running")
+    .lt("updated_at", staleCutoff)
+    .limit(100);
+
+  if (staleError) {
+    throw new Error("Stale PageSpeed queue recovery failed: " + staleError.message);
+  }
+
+  for (const stale of staleRows || []) {
+    const attempts = Number(stale.attempts || 0);
+    const { error: recoveryError } = await input.client
+      .from("crawl_performance_queue")
+      .update({
+        status: attempts >= 3 ? "failed" : "queued",
+        last_error: "Recovered stale PageSpeed worker state.",
+        available_at:
+          attempts >= 3
+            ? new Date().toISOString()
+            : new Date(Date.now() + 60_000).toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", stale.id)
+      .eq("status", "running");
+
+    if (recoveryError) {
+      throw new Error("PageSpeed stale row recovery failed: " + recoveryError.message);
+    }
+  }
 
   const { data: queue, error } = await input.client
     .from("crawl_performance_queue")
