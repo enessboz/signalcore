@@ -46,3 +46,8 @@ Never expose Supabase secret/service-role keys to the browser.
 3. Implement incremental GSC ingestion and job history.
 4. Add the first opportunity rules and findings inbox.
 5. Add the Light HTTP Crawler after GSC is stable.
+
+
+## Hosting
+
+Vercel is connected to the GitHub repository. Public Supabase environment variables are configured in Vercel; server-only GSC credentials remain intentionally unset until OAuth setup.
