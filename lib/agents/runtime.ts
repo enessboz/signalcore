@@ -147,7 +147,7 @@ export async function executeAgentTask(input: {
     try {
       const specialists = definitions
         .filter((definition) =>
-          ["seo_lead", "data_analyst", "reporting_output"].includes(definition.agent_key),
+          !["router_orchestrator", "chief_operator"].includes(definition.agent_key),
         )
         .map((definition) => ({
           agent_key: definition.agent_key,
@@ -183,7 +183,7 @@ export async function executeAgentTask(input: {
   }
 
   const target = byKey.get(targetKey);
-  if (!target || target.agent_key === "router_orchestrator") {
+  if (!target || ["router_orchestrator", "chief_operator"].includes(target.agent_key)) {
     throw new Error("Selected specialist agent is not available.");
   }
 
