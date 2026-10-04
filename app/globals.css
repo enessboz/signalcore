@@ -121,3 +121,75 @@ button, input, textarea { font: inherit; }
 .setupChecklist span { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .setupChecklist code { display: block; overflow-wrap: anywhere; font-size: 9px; background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 8px; }
 @media (max-width: 760px) { .setupChecklist { grid-template-columns: 1fr; } }
+
+.projectDataNav { display: flex; gap: 6px; margin: -8px 0 18px; padding: 4px; width: fit-content; background: #eceff3; border-radius: 10px; }
+.projectDataNavItem { padding: 7px 10px; border-radius: 7px; color: var(--muted); font-size: 10px; font-weight: 650; }
+.projectDataNavItem.active { background: white; color: var(--text); box-shadow: 0 1px 3px rgba(16,24,40,.08); }
+
+.explorerToolbar { margin-bottom: 14px; }
+.explorerForm { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; align-items: end; }
+.explorerForm label, .funnelToolbarRow label, .funnelStepCard label { display: grid; gap: 6px; color: #394150; font-size: 9px; font-weight: 700; }
+.explorerForm input, .explorerForm select,
+.funnelToolbarRow input, .funnelToolbarRow select,
+.funnelStepCard input { min-width: 0; border: 1px solid var(--line); background: white; border-radius: 8px; padding: 9px 10px; color: var(--text); }
+.wideControl { grid-column: span 2; }
+
+.dataContextBar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.dataContextBar > div { border: 1px solid var(--line); background: #fafbfc; border-radius: 9px; padding: 9px 11px; display: grid; gap: 2px; }
+.dataContextBar strong { font-size: 9px; }
+.dataContextBar span { color: var(--muted); font-size: 9px; overflow-wrap: anywhere; }
+
+.dataTwoCol { grid-template-columns: minmax(0, 1.55fr) minmax(280px, .45fr); }
+.sideStack { display: grid; gap: 16px; align-content: start; }
+.dataTableWrap { width: 100%; overflow: auto; max-height: 680px; border: 1px solid var(--line); border-radius: 9px; }
+.dataTable { border-collapse: collapse; width: 100%; min-width: 720px; background: white; }
+.dataTable th { position: sticky; top: 0; z-index: 1; background: #f7f8fa; color: #596273; text-align: left; padding: 9px 10px; font-size: 9px; text-transform: none; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dataTable td { padding: 9px 10px; border-bottom: 1px solid #eef0f3; color: #313844; font-size: 10px; vertical-align: top; }
+.dataTable tr:last-child td { border-bottom: 0; }
+.cellEllipsis { display: block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compactForm { gap: 10px; }
+.savedViewList { display: grid; }
+.savedViewRow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.savedViewRow strong { font-size: 10px; }
+.savedViewRow span { color: var(--muted); font-size: 9px; }
+
+.trendList { display: grid; }
+.trendRow { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); align-items: center; }
+.trendRow > span { color: var(--muted); font-size: 9px; }
+.trendMetrics { display: grid; text-align: right; gap: 1px; }
+.trendMetrics strong { font-size: 9px; }
+.trendMetrics small { color: var(--muted); font-size: 8px; }
+
+.modeTabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.modeTab { border: 1px solid var(--line); background: white; padding: 8px 11px; border-radius: 8px; color: var(--muted); font-size: 10px; font-weight: 650; }
+.modeTab.active { color: white; background: var(--dark); border-color: var(--dark); }
+
+.metricStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.metricStrip .statCard strong { font-size: 20px; }
+
+.funnelForm { display: grid; gap: 14px; }
+.funnelToolbarRow { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; align-items: end; }
+.checkboxLabel { display: flex !important; flex-direction: row; align-items: center; gap: 7px !important; min-height: 36px; }
+.checkboxLabel input { width: auto; }
+.funnelSteps { display: grid; gap: 8px; }
+.funnelStepCard { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fafbfc; }
+.stepNumber { width: 28px; height: 28px; border-radius: 999px; background: var(--dark); color: white; display: grid; place-items: center; font-size: 10px; font-weight: 700; align-self: center; }
+
+@media (max-width: 1100px) {
+  .explorerForm { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+  .dataTwoCol { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .projectDataNav { width: 100%; overflow-x: auto; }
+  .projectDataNavItem { white-space: nowrap; }
+  .explorerForm { grid-template-columns: 1fr 1fr; }
+  .wideControl { grid-column: span 2; }
+  .dataContextBar { grid-template-columns: 1fr; }
+  .funnelToolbarRow { grid-template-columns: 1fr 1fr; }
+  .funnelStepCard { grid-template-columns: 28px 1fr; }
+  .funnelStepCard label:last-child { grid-column: 2; }
+}
+@media (max-width: 520px) {
+  .explorerForm, .funnelToolbarRow { grid-template-columns: 1fr; }
+  .wideControl { grid-column: auto; }
+}
