@@ -545,3 +545,24 @@ button, input, textarea { font: inherit; }
   .readinessRowActions { grid-column: 2; justify-items: start; }
   .readinessLaunchPanel { align-items: stretch; flex-direction: column; }
 }
+
+.syncControlGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 4px; }
+.syncControlCard { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 12px; display: grid; gap: 10px; }
+.syncControlCard > div:first-child { display: grid; gap: 3px; }
+.syncControlCard strong { font-size: 10px; }
+.syncControlCard span { color: var(--muted); font-size: 8px; }
+.syncBackfillForm { display: flex; gap: 8px; align-items: end; }
+.syncBackfillForm label { display: grid; gap: 5px; font-size: 8px; font-weight: 700; }
+.syncBackfillForm select { border: 1px solid var(--line); background: white; border-radius: 7px; padding: 7px 8px; }
+.syncStatusPanel { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 4px; }
+.syncStateList, .syncQueueList { border: 1px solid var(--line); border-radius: 9px; background: white; padding: 0 10px; }
+.syncStateRow, .syncQueueRow { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.syncStateRow:first-child, .syncQueueRow:first-child { border-top: 0; }
+.syncStateRow > div { display: grid; gap: 2px; min-width: 0; }
+.syncStateRow strong, .syncQueueRow strong { font-size: 8px; }
+.syncStateRow span, .syncQueueRow span { color: var(--muted); font-size: 7px; }
+.syncQueueRow small { margin-left: auto; }
+@media (max-width: 760px) {
+  .syncControlGrid, .syncStatusPanel { grid-template-columns: 1fr; }
+  .syncBackfillForm { align-items: stretch; flex-direction: column; }
+}
