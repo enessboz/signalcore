@@ -5,7 +5,13 @@ export function ProjectDataNav({
   active,
 }: {
   projectId: string;
-  active: "overview" | "gsc" | "ga4" | "technical" | "rank";
+  active:
+    | "overview"
+    | "gsc"
+    | "ga4"
+    | "technical"
+    | "rank"
+    | "interventions";
 }) {
   const items = [
     ["overview", "Project", `/projects/${projectId}`],
@@ -13,6 +19,7 @@ export function ProjectDataNav({
     ["ga4", "GA4 Analytics", `/projects/${projectId}/analytics`],
     ["technical", "Technical Audit", `/projects/${projectId}/technical`],
     ["rank", "Rank Tracker", `/projects/${projectId}/rank-tracker`],
+    ["interventions", "Interventions", `/projects/${projectId}/interventions`],
   ] as const;
 
   return (
