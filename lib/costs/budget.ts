@@ -62,8 +62,8 @@ async function syncBudgetFinding(input: {
   client: SupabaseClient;
   ownerId: string;
   projectId: string;
-  category: CostCategory;
-  state: BudgetState;
+  category: string;
+  state: Awaited<ReturnType<typeof getBudgetState>>;
   projectedSpend?: number;
   blocked?: boolean;
 }) {
@@ -71,7 +71,7 @@ async function syncBudgetFinding(input: {
   const limit = input.state.monthlyLimit;
   const spend =
     input.projectedSpend === undefined
-      ? input.state.currentSpend
+      ? input.state.spent
       : input.projectedSpend;
   const percent =
     limit !== null && limit > 0 ? (spend / limit) * 100 : 0;
@@ -139,7 +139,7 @@ async function syncBudgetFinding(input: {
         source: "budget_guard",
         category: input.category,
         monthly_limit: limit,
-        current_spend: input.state.currentSpend,
+        current_spend: input.state.spent,
         projected_spend: spend,
         soft_warning_percent: warningThreshold,
         hard_stop: input.state.hardStop,
@@ -163,20 +163,32 @@ export async function assertBudgetAvailable(input: {
   estimatedNextCost?: number;
   client?: SupabaseClient;
 }) {
-  const state = await getBudgetState(input);
-
-  if (
+  const supabase = input.client || (await createClient());
+  const state = await getBudgetState({ ...input, client: supabase });
+  const projectedSpend = state.spent + Math.max(Number(input.estimatedNextCost || 0), 0);
+  const blocked =
     state.configured &&
     state.hardStop &&
     state.monthlyLimit !== null &&
-    state.spent + Number(input.estimatedNextCost || 0) >= state.monthlyLimit
-  ) {
+    projectedSpend >= state.monthlyLimit;
+
+  await syncBudgetFinding({
+    client: supabase,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    state,
+    projectedSpend,
+    blocked,
+  });
+
+  if (blocked) {
     throw new Error(
-      `${input.category.toUpperCase()} monthly budget hard-stop reached for this project. Used $${state.spent.toFixed(2)} of $${state.monthlyLimit.toFixed(2)}.`,
+      `${input.category.toUpperCase()} monthly budget hard-stop reached for this project. Used $${state.spent.toFixed(2)} of $${state.monthlyLimit!.toFixed(2)}.`,
     );
   }
 
-  return state;
+  return { ...state, projectedSpend };
 }
 
 export async function logUsage(input: {
@@ -206,4 +218,19 @@ export async function logUsage(input: {
   if (error) {
     throw new Error(`Usage event could not be logged: ${error.message}`);
   }
+
+  const state = await getBudgetState({
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    client: supabase,
+  });
+
+  await syncBudgetFinding({
+    client: supabase,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    state,
+  });
 }
