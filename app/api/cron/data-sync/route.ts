@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleGoogleSyncJobs } from "@/lib/runtime/recovery";
 import { enqueueGoogleSync, processGoogleSyncJob } from "@/lib/google/sync";
 
 export const runtime = "nodejs";
@@ -35,6 +37,21 @@ export async function POST(request: NextRequest) {
 
   const startedAt = Date.now();
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:data-sync",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another data sync worker invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleJobs = await recoverStaleGoogleSyncJobs(supabase);
 
   const { data: bindings, error: bindingError } = await supabase
     .from("project_bindings")
@@ -155,6 +172,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
+    recovered_stale_jobs: recoveredStaleJobs,
     bindings_checked: bindings?.length || 0,
     enqueue_results: enqueueResults,
     jobs_processed: processed.length,
