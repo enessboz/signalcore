@@ -7,6 +7,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { fetchGithubRepositoryContext } from "@/lib/github/read-context";
+import { assertBudgetAvailable, logUsage } from "@/lib/costs/budget";
 
 type AgentDefinition = {
   agent_key: string;
@@ -73,6 +74,9 @@ async function finishRun(input: {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  ownerId: string;
+  projectId: string;
+  agentKey: string;
   client?: SupabaseClient;
 }) {
   const supabase = input.client || (await createClient());
@@ -92,6 +96,24 @@ async function finishRun(input: {
     .eq("id", input.runId);
 
   if (error) throw new Error(error.message);
+
+  await logUsage({
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: "ai",
+    provider: "openai",
+    units: input.inputTokens + input.outputTokens,
+    estimatedCost: cost,
+    actualCost: cost,
+    metadata: {
+      run_id: input.runId,
+      agent_key: input.agentKey,
+      model: input.model,
+      input_tokens: input.inputTokens,
+      output_tokens: input.outputTokens,
+    },
+    client: supabase,
+  });
 }
 
 async function failRun(runId: string, error: unknown, client?: SupabaseClient) {
@@ -249,6 +271,17 @@ export async function executeAgentTask(input: {
     if (!router) throw new Error("Router / Orchestrator is not available.");
 
     const routerModel = configuredModel(router);
+    const routerEstimatedInputTokens = Math.ceil(
+      (input.userRequest.length + projectPrompt.length) / 4,
+    );
+    await assertBudgetAvailable({
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      category: "ai",
+      estimatedNextCost:
+        estimateModelCost(routerModel, routerEstimatedInputTokens, 500) || 0,
+      client: supabase,
+    });
     const routerRunId = await createRun({
       ownerId: input.ownerId,
       projectId: input.projectId,
@@ -291,6 +324,9 @@ export async function executeAgentTask(input: {
         model: routerModel,
         inputTokens: routed.usage.inputTokens,
         outputTokens: routed.usage.outputTokens,
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        agentKey: router.agent_key,
         client: supabase,
       });
       parentRunId = routerRunId;
@@ -316,6 +352,18 @@ export async function executeAgentTask(input: {
       "\n\nDEVELOPER REPOSITORY CONTEXT:\n" +
       JSON.stringify(repositoryContext, null, 2);
   }
+
+  const specialistEstimatedInputTokens = Math.ceil(
+    (input.userRequest.length + specialistContext.length) / 4,
+  );
+  await assertBudgetAvailable({
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: "ai",
+    estimatedNextCost:
+      estimateModelCost(model, specialistEstimatedInputTokens, 2400) || 0,
+    client: supabase,
+  });
 
   const runId = await createRun({
     ownerId: input.ownerId,
@@ -344,6 +392,9 @@ export async function executeAgentTask(input: {
       model,
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      agentKey: target.agent_key,
       client: supabase,
     });
 
