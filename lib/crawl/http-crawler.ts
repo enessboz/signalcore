@@ -2,24 +2,58 @@ import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-export type CrawledPage = {
+export type CrawledLink = {
   url: string;
+  anchorText: string | null;
+  rel: string | null;
+  nofollow: boolean;
+};
+
+export type HreflangReference = {
+  hreflang: string;
+  url: string;
+};
+
+export type RedirectHop = {
+  url: string;
+  status: number;
+  location: string | null;
+};
+
+export type CrawledPage = {
+  requestedUrl: string;
+  url: string;
+  redirectChain: RedirectHop[];
   statusCode: number | null;
   responseMs: number | null;
   contentType: string | null;
+  contentLengthBytes: number | null;
   title: string | null;
   metaDescription: string | null;
   canonical: string | null;
   robotsMeta: string | null;
+  xRobotsTag: string | null;
+  htmlLang: string | null;
+  metaRefresh: string | null;
+  hreflangs: HreflangReference[];
   h1s: string[];
   h2s: string[];
+  h3s: string[];
+  h4s: string[];
+  h5s: string[];
+  h6s: string[];
   wordCount: number;
+  internalLinks: CrawledLink[];
+  externalLinks: CrawledLink[];
   internalLinkCount: number;
   externalLinkCount: number;
   imageCount: number;
   missingAltCount: number;
   structuredDataCount: number;
+  invalidStructuredDataCount: number;
   contentHash: string | null;
+  indexable: boolean | null;
+  indexabilityReason: string | null;
   fetchError: string | null;
   metadata: Record<string, unknown>;
 };
@@ -87,8 +121,9 @@ async function safeFetch(
 ) {
   let url = await assertPublicUrl(raw);
   const started = Date.now();
+  const redirectChain: RedirectHop[] = [];
 
-  for (let redirect = 0; redirect < 5; redirect += 1) {
+  for (let redirect = 0; redirect < 6; redirect += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
 
@@ -96,7 +131,7 @@ async function safeFetch(
     try {
       response = await fetch(url, {
         headers: {
-          "User-Agent": "SignalCoreBot/0.1 (+SEO audit; controlled project crawl)",
+          "User-Agent": "SignalCoreBot/0.2 (+SEO audit; controlled project crawl)",
           Accept: options.accept || "text/html,application/xhtml+xml",
         },
         redirect: "manual",
@@ -109,7 +144,21 @@ async function safeFetch(
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
-      if (!location) return { response, url, elapsed: Date.now() - started, text: "" };
+      redirectChain.push({
+        url: url.toString(),
+        status: response.status,
+        location,
+      });
+      if (!location) {
+        return {
+          response,
+          url,
+          elapsed: Date.now() - started,
+          text: "",
+          bytes: 0,
+          redirectChain,
+        };
+      }
       url = await assertPublicUrl(new URL(location, url).toString());
       continue;
     }
@@ -130,6 +179,8 @@ async function safeFetch(
       url,
       elapsed: Date.now() - started,
       text: new TextDecoder().decode(buffer),
+      bytes: buffer.byteLength,
+      redirectChain,
     };
   }
 
@@ -150,11 +201,12 @@ function cleanText(value: string) {
   return decodeEntities(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
 }
 
-function tagContent(html: string, tag: string) {
+function tagContent(html: string, tag: string, max = 100) {
   const re = new RegExp("<" + tag + "\\b[^>]*>([\\s\\S]*?)<\\/" + tag + ">", "gi");
   return Array.from(html.matchAll(re))
     .map((match) => cleanText(match[1] || ""))
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, max);
 }
 
 function attr(tag: string, name: string) {
@@ -174,6 +226,20 @@ function findMeta(html: string, key: string) {
   return null;
 }
 
+function findMetaRefresh(html: string) {
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const httpEquiv = (attr(tag, "http-equiv") || "").toLowerCase();
+    if (httpEquiv === "refresh") return attr(tag, "content");
+  }
+  return null;
+}
+
+function findHtmlLang(html: string) {
+  const tag = html.match(/<html\b[^>]*>/i)?.[0];
+  return tag ? attr(tag, "lang") : null;
+}
+
 function findCanonical(html: string, base: URL) {
   const tags = html.match(/<link\b[^>]*>/gi) || [];
   for (const tag of tags) {
@@ -190,15 +256,45 @@ function findCanonical(html: string, base: URL) {
   return null;
 }
 
-function extractLinks(html: string, base: URL) {
-  const tags = html.match(/<a\b[^>]*>/gi) || [];
-  const internal = new Set<string>();
-  const external = new Set<string>();
-  const emails = new Set<string>();
-  const phones = new Set<string>();
+function findHreflangs(html: string, base: URL) {
+  const out: HreflangReference[] = [];
+  const seen = new Set<string>();
+  const tags = html.match(/<link\b[^>]*>/gi) || [];
 
   for (const tag of tags) {
+    const rel = (attr(tag, "rel") || "").toLowerCase().split(/\s+/);
+    const hreflang = attr(tag, "hreflang");
     const href = attr(tag, "href");
+    if (!rel.includes("alternate") || !hreflang || !href) continue;
+
+    try {
+      const url = new URL(href, base).toString();
+      const key = hreflang.toLowerCase() + "|" + url;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ hreflang, url });
+    } catch {
+      // Ignore malformed hreflang URLs.
+    }
+  }
+
+  return out.slice(0, 100);
+}
+
+function extractLinks(html: string, base: URL) {
+  const internal: CrawledLink[] = [];
+  const external: CrawledLink[] = [];
+  const emails = new Set<string>();
+  const phones = new Set<string>();
+  const seenInternal = new Set<string>();
+  const seenExternal = new Set<string>();
+  const anchors = Array.from(
+    html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi),
+  ).slice(0, 4000);
+
+  for (const match of anchors) {
+    const openTag = "<a " + (match[1] || "") + ">";
+    const href = attr(openTag, "href");
     if (!href || href.startsWith("#")) continue;
 
     if (href.toLowerCase().startsWith("mailto:")) {
@@ -217,16 +313,34 @@ function extractLinks(html: string, base: URL) {
       const url = new URL(href, base);
       if (!["http:", "https:"].includes(url.protocol)) continue;
       url.hash = "";
-      if (url.hostname === base.hostname) internal.add(url.toString());
-      else external.add(url.toString());
+      const rel = attr(openTag, "rel");
+      const relTokens = (rel || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const link: CrawledLink = {
+        url: url.toString(),
+        anchorText: cleanText(match[2] || "").slice(0, 500) || null,
+        rel,
+        nofollow: relTokens.includes("nofollow"),
+      };
+
+      const dedupeKey =
+        link.url + "|" + (link.anchorText || "") + "|" + (link.rel || "");
+      if (url.origin === base.origin) {
+        if (!seenInternal.has(dedupeKey) && internal.length < 1500) {
+          seenInternal.add(dedupeKey);
+          internal.push(link);
+        }
+      } else if (!seenExternal.has(dedupeKey) && external.length < 500) {
+        seenExternal.add(dedupeKey);
+        external.push(link);
+      }
     } catch {
       // Ignore malformed hrefs.
     }
   }
 
   return {
-    internal: [...internal],
-    external: [...external],
+    internal,
+    external,
     emails: [...emails],
     phones: [...phones],
   };
@@ -242,6 +356,33 @@ function imageStats(html: string) {
   return { imageCount: tags.length, missingAltCount: missingAlt };
 }
 
+function structuredDataStats(html: string) {
+  const scripts = Array.from(
+    html.matchAll(
+      /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+    ),
+  );
+  let invalid = 0;
+
+  for (const script of scripts) {
+    const raw = (script[1] || "").trim();
+    if (!raw) {
+      invalid += 1;
+      continue;
+    }
+    try {
+      JSON.parse(raw);
+    } catch {
+      invalid += 1;
+    }
+  }
+
+  return {
+    count: scripts.length,
+    invalid,
+  };
+}
+
 function visibleWordCount(html: string) {
   const cleaned = html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
@@ -251,118 +392,221 @@ function visibleWordCount(html: string) {
   return text ? text.split(/\s+/).filter(Boolean).length : 0;
 }
 
+function normalizeComparableUrl(raw: string | null) {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    if (
+      (url.protocol === "https:" && url.port === "443") ||
+      (url.protocol === "http:" && url.port === "80")
+    ) {
+      url.port = "";
+    }
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString();
+  } catch {
+    return raw.trim();
+  }
+}
+
+function indexability(input: {
+  statusCode: number;
+  contentType: string | null;
+  robotsMeta: string | null;
+  xRobotsTag: string | null;
+  canonical: string | null;
+  finalUrl: string;
+}) {
+  if (input.statusCode < 200 || input.statusCode >= 300) {
+    return { indexable: false, reason: "http_status_" + input.statusCode };
+  }
+
+  if (!input.contentType?.toLowerCase().includes("text/html")) {
+    return { indexable: false, reason: "non_html" };
+  }
+
+  const robots = [input.robotsMeta, input.xRobotsTag]
+    .filter(Boolean)
+    .join(",")
+    .toLowerCase();
+
+  if (robots.includes("noindex")) {
+    return { indexable: false, reason: "noindex" };
+  }
+
+  const canonical = normalizeComparableUrl(input.canonical);
+  const finalUrl = normalizeComparableUrl(input.finalUrl);
+  if (canonical && finalUrl && canonical !== finalUrl) {
+    return { indexable: false, reason: "canonicalized" };
+  }
+
+  return { indexable: true, reason: "indexable_candidate" };
+}
+
+function emptyPage(rawUrl: string, error: string): CrawledPage {
+  return {
+    requestedUrl: rawUrl,
+    url: rawUrl,
+    redirectChain: [],
+    statusCode: null,
+    responseMs: null,
+    contentType: null,
+    contentLengthBytes: null,
+    title: null,
+    metaDescription: null,
+    canonical: null,
+    robotsMeta: null,
+    xRobotsTag: null,
+    htmlLang: null,
+    metaRefresh: null,
+    hreflangs: [],
+    h1s: [],
+    h2s: [],
+    h3s: [],
+    h4s: [],
+    h5s: [],
+    h6s: [],
+    wordCount: 0,
+    internalLinks: [],
+    externalLinks: [],
+    internalLinkCount: 0,
+    externalLinkCount: 0,
+    imageCount: 0,
+    missingAltCount: 0,
+    structuredDataCount: 0,
+    invalidStructuredDataCount: 0,
+    contentHash: null,
+    indexable: false,
+    indexabilityReason: "fetch_error",
+    fetchError: error,
+    metadata: {},
+  };
+}
+
 export async function crawlPage(rawUrl: string, expectedOrigin: string): Promise<CrawledPage> {
   try {
     const result = await safeFetch(rawUrl);
     const finalUrl = result.url;
     const contentType = result.response.headers.get("content-type");
+    const xRobotsTag = result.response.headers.get("x-robots-tag");
     const html = result.text;
 
     if (new URL(finalUrl).origin !== expectedOrigin) {
       return {
+        ...emptyPage(rawUrl, "Final URL left the project origin; body was not analyzed."),
         url: finalUrl.toString(),
+        redirectChain: result.redirectChain,
         statusCode: result.response.status,
         responseMs: result.elapsed,
         contentType,
-        title: null,
-        metaDescription: null,
-        canonical: null,
-        robotsMeta: null,
-        h1s: [],
-        h2s: [],
-        wordCount: 0,
-        internalLinkCount: 0,
-        externalLinkCount: 0,
-        imageCount: 0,
-        missingAltCount: 0,
-        structuredDataCount: 0,
-        contentHash: null,
-        fetchError: "Final URL left the project origin; body was not analyzed.",
+        contentLengthBytes: result.bytes,
+        xRobotsTag,
+        indexabilityReason: "redirected_outside_origin",
         metadata: { redirected_outside_origin: true },
       };
     }
 
     if (!contentType?.toLowerCase().includes("text/html")) {
+      const indexState = indexability({
+        statusCode: result.response.status,
+        contentType,
+        robotsMeta: null,
+        xRobotsTag,
+        canonical: null,
+        finalUrl: finalUrl.toString(),
+      });
+
       return {
+        ...emptyPage(rawUrl, ""),
         url: finalUrl.toString(),
+        redirectChain: result.redirectChain,
         statusCode: result.response.status,
         responseMs: result.elapsed,
         contentType,
-        title: null,
-        metaDescription: null,
-        canonical: null,
-        robotsMeta: null,
-        h1s: [],
-        h2s: [],
-        wordCount: 0,
-        internalLinkCount: 0,
-        externalLinkCount: 0,
-        imageCount: 0,
-        missingAltCount: 0,
-        structuredDataCount: 0,
+        contentLengthBytes: result.bytes,
+        xRobotsTag,
         contentHash: createHash("sha256").update(html).digest("hex"),
+        indexable: indexState.indexable,
+        indexabilityReason: indexState.reason,
         fetchError: null,
         metadata: { non_html: true },
       };
     }
 
-    const title = tagContent(html, "title")[0] || null;
-    const h1s = tagContent(html, "h1").slice(0, 20);
-    const h2s = tagContent(html, "h2").slice(0, 50);
+    const title = tagContent(html, "title", 1)[0] || null;
+    const h1s = tagContent(html, "h1", 50);
+    const h2s = tagContent(html, "h2", 100);
+    const h3s = tagContent(html, "h3", 150);
+    const h4s = tagContent(html, "h4", 150);
+    const h5s = tagContent(html, "h5", 150);
+    const h6s = tagContent(html, "h6", 150);
     const links = extractLinks(html, finalUrl);
     const images = imageStats(html);
-    const structuredDataCount = (html.match(
-      /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>/gi,
-    ) || []).length;
+    const structured = structuredDataStats(html);
+    const robotsMeta = findMeta(html, "robots");
+    const canonical = findCanonical(html, finalUrl);
+    const hreflangs = findHreflangs(html, finalUrl);
+    const indexState = indexability({
+      statusCode: result.response.status,
+      contentType,
+      robotsMeta,
+      xRobotsTag,
+      canonical,
+      finalUrl: finalUrl.toString(),
+    });
 
     return {
+      requestedUrl: rawUrl,
       url: finalUrl.toString(),
+      redirectChain: result.redirectChain,
       statusCode: result.response.status,
       responseMs: result.elapsed,
       contentType,
+      contentLengthBytes: result.bytes,
       title,
       metaDescription: findMeta(html, "description"),
-      canonical: findCanonical(html, finalUrl),
-      robotsMeta: findMeta(html, "robots"),
+      canonical,
+      robotsMeta,
+      xRobotsTag,
+      htmlLang: findHtmlLang(html),
+      metaRefresh: findMetaRefresh(html),
+      hreflangs,
       h1s,
       h2s,
+      h3s,
+      h4s,
+      h5s,
+      h6s,
       wordCount: visibleWordCount(html),
+      internalLinks: links.internal,
+      externalLinks: links.external,
       internalLinkCount: links.internal.length,
       externalLinkCount: links.external.length,
       imageCount: images.imageCount,
       missingAltCount: images.missingAltCount,
-      structuredDataCount,
+      structuredDataCount: structured.count,
+      invalidStructuredDataCount: structured.invalid,
       contentHash: createHash("sha256").update(html).digest("hex"),
+      indexable: indexState.indexable,
+      indexabilityReason: indexState.reason,
       fetchError: null,
       metadata: {
-        internal_links_sample: links.internal.slice(0, 25),
-        external_links_sample: links.external.slice(0, 10),
+        internal_links_sample: links.internal.slice(0, 25).map((link) => link.url),
+        external_links_sample: links.external.slice(0, 10).map((link) => link.url),
         email_sample: links.emails.slice(0, 10),
         phone_sample: links.phones.slice(0, 10),
+        redirect_count: result.redirectChain.length,
+        canonical_matches_final:
+          normalizeComparableUrl(canonical) === normalizeComparableUrl(finalUrl.toString()),
       },
     };
   } catch (error) {
-    return {
-      url: rawUrl,
-      statusCode: null,
-      responseMs: null,
-      contentType: null,
-      title: null,
-      metaDescription: null,
-      canonical: null,
-      robotsMeta: null,
-      h1s: [],
-      h2s: [],
-      wordCount: 0,
-      internalLinkCount: 0,
-      externalLinkCount: 0,
-      imageCount: 0,
-      missingAltCount: 0,
-      structuredDataCount: 0,
-      contentHash: null,
-      fetchError: error instanceof Error ? error.message : "Fetch failed.",
-      metadata: {},
-    };
+    return emptyPage(
+      rawUrl,
+      error instanceof Error ? error.message : "Fetch failed.",
+    );
   }
 }
 
@@ -378,7 +622,11 @@ async function fetchText(url: string, maxBytes = 5_000_000) {
     timeoutMs: 12000,
     accept: "application/xml,text/xml,text/plain,*/*",
   });
-  return { text: result.text, status: result.response.status, finalUrl: result.url };
+  return {
+    text: result.text,
+    status: result.response.status,
+    finalUrl: result.url,
+  };
 }
 
 export async function discoverSitemapUrls(seed: string, maxUrls: number) {
@@ -403,7 +651,7 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
   const sitemapQueue = [...sitemapCandidates];
   const seenSitemaps = new Set<string>();
 
-  while (sitemapQueue.length && seenSitemaps.size < 30 && discovered.size < maxUrls) {
+  while (sitemapQueue.length && seenSitemaps.size < 50 && discovered.size < maxUrls) {
     const sitemapUrl = sitemapQueue.shift()!;
     if (seenSitemaps.has(sitemapUrl)) continue;
     seenSitemaps.add(sitemapUrl);
@@ -415,7 +663,7 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
 
       if (/<sitemapindex\b/i.test(sitemap.text)) {
         for (const loc of locs) {
-          if (sitemapQueue.length >= 100) break;
+          if (sitemapQueue.length >= 200) break;
           try {
             const parsed = new URL(loc);
             if (parsed.origin === origin) sitemapQueue.push(parsed.toString());
@@ -442,9 +690,12 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
   }
 
   const home = new URL("/", origin).toString();
+  const sitemapUrls = Array.from(discovered).slice(0, maxUrls);
   return {
     origin,
-    urls: [home, ...Array.from(discovered).filter((url) => url !== home)].slice(0, maxUrls),
+    urls: [home, ...sitemapUrls.filter((url) => url !== home)].slice(0, maxUrls),
+    sitemapUrls,
+    sitemapSources: [...seenSitemaps],
     sitemapCount: seenSitemaps.size,
   };
 }
