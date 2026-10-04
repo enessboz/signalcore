@@ -28,6 +28,13 @@ type PageComparison = {
   previous_position: number;
 };
 
+type GscOpportunityPayload = {
+  available?: boolean;
+  period?: Record<string, string | null>;
+  queries?: QueryComparison[];
+  pages?: PageComparison[];
+};
+
 type Candidate = {
   findingType: FindingType;
   fingerprint: string;
@@ -578,12 +585,7 @@ export async function detectWarehouseOpportunities(input: {
 }) {
   const supabase = input.client || (await createClient());
   const candidates: Candidate[] = [];
-  let gscPayload: {
-    available?: boolean;
-    period?: Record<string, string | null>;
-    queries?: QueryComparison[];
-    pages?: PageComparison[];
-  } | null = null;
+  let gscPayload: GscOpportunityPayload | null = null;
   let ga4Payload: Record<string, unknown> | null = null;
 
   if (input.scanGsc !== false) {
@@ -593,7 +595,7 @@ export async function detectWarehouseOpportunities(input: {
       p_limit: 2500,
     });
     if (error) throw new Error("GSC opportunity dataset failed: " + error.message);
-    gscPayload = (data || {}) as typeof gscPayload;
+    gscPayload = (data || {}) as GscOpportunityPayload;
 
     const queries = gscPayload?.queries || [];
     const pages = gscPayload?.pages || [];
@@ -664,7 +666,6 @@ export async function detectWarehouseOpportunities(input: {
       })),
       {
         onConflict: "project_id,fingerprint",
-        defaultToNull: false,
       },
     );
     if (error) throw new Error("Opportunity findings could not be saved: " + error.message);
