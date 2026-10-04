@@ -489,3 +489,31 @@ button, input, textarea { font: inherit; }
 .teamAgentStates { display: grid; gap: 4px; justify-items: end; }
 .teamReady { background: #ecfdf3; color: #067647; }
 .teamPartial { background: #eef4ff; color: #3538cd; }
+
+.approvalHeaderCount { border: 1px solid var(--line); border-radius: 10px; background: white; padding: 10px 12px; display: grid; gap: 2px; min-width: 130px; }
+.approvalHeaderCount strong { font-size: 20px; letter-spacing: -.03em; }
+.approvalHeaderCount span { color: var(--muted); font-size: 8px; }
+.approvalList { display: grid; gap: 12px; }
+.approvalCard { border: 1px solid var(--line); border-radius: 12px; background: white; padding: 16px; }
+.approvalTop { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
+.approvalTags { display: flex; flex-wrap: wrap; gap: 6px; }
+.approvalRisk { display: inline-flex; padding: 4px 7px; border-radius: 999px; font-size: 8px; font-weight: 700; text-transform: uppercase; }
+.approvalRiskHigh { background: #fff1f2; color: #b42318; }
+.approvalRiskMedium { background: #fff7ed; color: #b54708; }
+.approvalRiskLow { background: #ecfdf3; color: #067647; }
+.approvalTitle { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.approvalTitle h2 { margin: 3px 0 5px; font-size: 14px; }
+.approvalTitle p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.approvalDetails { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-top: 12px; }
+.approvalDetails > div { border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 9px; display: grid; gap: 3px; }
+.approvalDetails strong { font-size: 8px; }
+.approvalDetails span { color: var(--muted); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.approvalActions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.approvalActions form { margin: 0; }
+.approvalActions > span { color: var(--muted); font-size: 8px; margin-left: auto; max-width: 420px; }
+.approvalDecision { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; text-transform: capitalize; }
+@media (max-width: 720px) {
+  .approvalTitle { flex-direction: column; }
+  .approvalDetails { grid-template-columns: 1fr; }
+  .approvalActions > span { width: 100%; margin-left: 0; }
+}
