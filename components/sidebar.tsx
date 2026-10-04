@@ -12,6 +12,7 @@ const sections = [
   ["Output Profiles", "/output-profiles"],
   ["Approvals", "/approvals"],
   ["System Readiness", "/readiness"],
+  ["Costs & Budgets", "/costs"],
   ["Issues & Regressions", "/issues"],
   ["Sales", "/sales"],
   ["Automations", "/automations"],
