@@ -10,6 +10,8 @@ type ChiefAction = {
     | "run_prospect_audit"
     | "link_github_repo"
     | "run_serp_research"
+    | "set_google_auto_sync"
+    | "queue_google_backfill"
     | "no_action";
   project_ref: string | null;
   project_type: "owned" | "client" | "lead_prospect" | null;
@@ -36,6 +38,9 @@ type ChiefAction = {
   keywords: string[];
   location_code: number | null;
   language_code: string | null;
+  data_source: "gsc" | "ga4" | null;
+  enabled: boolean | null;
+  backfill_days: number | null;
 };
 
 export type ChiefPlan = {
@@ -99,6 +104,9 @@ const actionSchema = {
     "keywords",
     "location_code",
     "language_code",
+    "data_source",
+    "enabled",
+    "backfill_days",
   ],
   properties: {
     type: {
@@ -114,6 +122,8 @@ const actionSchema = {
         "run_prospect_audit",
         "link_github_repo",
         "run_serp_research",
+        "set_google_auto_sync",
+        "queue_google_backfill",
         "no_action",
       ],
     },
@@ -165,6 +175,12 @@ const actionSchema = {
     keywords: { type: "array", maxItems: 10, items: { type: "string" } },
     location_code: { type: ["integer", "null"] },
     language_code: { type: ["string", "null"] },
+    data_source: {
+      type: ["string", "null"],
+      enum: ["gsc", "ga4", null],
+    },
+    enabled: { type: ["boolean", "null"] },
+    backfill_days: { type: ["integer", "null"], enum: [30, 90, 180, null] },
   },
 };
 
@@ -217,7 +233,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nReturn only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nFor first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
