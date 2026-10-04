@@ -17,6 +17,8 @@ type ChiefAction = {
     | "assign_output_profile"
     | "set_budget_limit"
     | "convert_project_to_client"
+    | "create_technical_crawl_schedule"
+    | "manage_technical_crawl_schedule"
     | "create_sales_campaign"
     | "run_sales_campaign"
     | "qualify_sales_campaign"
@@ -78,6 +80,7 @@ type ChiefAction = {
   max_candidates: number | null;
   max_run_cost: number | null;
   auto_qualify_count: number | null;
+  crawl_mode: "http" | "delta" | null;
 };
 
 export type ChiefPlan = {
@@ -169,6 +172,7 @@ const actionSchema = {
     "max_candidates",
     "max_run_cost",
     "auto_qualify_count",
+    "crawl_mode",
   ],
   properties: {
     type: {
@@ -191,6 +195,8 @@ const actionSchema = {
         "assign_output_profile",
         "set_budget_limit",
         "convert_project_to_client",
+        "create_technical_crawl_schedule",
+        "manage_technical_crawl_schedule",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
@@ -292,6 +298,10 @@ const actionSchema = {
     max_candidates: { type: ["integer", "null"], minimum: 1, maximum: 1000 },
     max_run_cost: { type: ["number", "null"], minimum: 0 },
     auto_qualify_count: { type: ["integer", "null"], minimum: 0, maximum: 10 },
+    crawl_mode: {
+      type: ["string", "null"],
+      enum: ["http", "delta", null],
+    },
   },
 };
 
@@ -344,7 +354,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
