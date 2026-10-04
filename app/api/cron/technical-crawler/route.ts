@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleCrawlSchedules } from "@/lib/runtime/recovery";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,6 +24,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:technical-crawler",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another technical crawler invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleSchedules = await recoverStaleCrawlSchedules(supabase);
   const now = new Date();
 
   const { data: schedules, error } = await supabase
@@ -126,6 +143,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
+    recovered_stale_schedules: recoveredStaleSchedules,
     checked: schedules?.length || 0,
     due: due.length,
     processed: results.length,
