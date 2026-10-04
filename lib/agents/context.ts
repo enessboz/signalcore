@@ -36,6 +36,14 @@ export type AgentProjectContext = {
     resource_id: string;
     display_name: string | null;
   }>;
+  serp_evidence: Array<{
+    keyword: string;
+    location_code: number | null;
+    language_code: string | null;
+    status: string;
+    result: Record<string, unknown>;
+    checked_at: string;
+  }>;
   repositories: Array<{
     repo_full_name: string;
     default_branch: string | null;
@@ -105,6 +113,7 @@ export async function buildAgentProjectContext(
     { data: bindings },
     { data: latestCrawl },
     { data: repositories },
+    { data: serpEvidence },
   ] = await Promise.all([
     supabase
       .from("project_facts")
@@ -144,6 +153,13 @@ export async function buildAgentProjectContext(
       .eq("status", "active")
       .order("created_at", { ascending: true })
       .limit(4),
+    supabase
+      .from("serp_checks")
+      .select("keyword,location_code,language_code,status,result,checked_at")
+      .eq("project_id", projectId)
+      .eq("status", "succeeded")
+      .order("checked_at", { ascending: false })
+      .limit(20),
   ]);
 
   let crawlPages: Array<{
@@ -203,6 +219,10 @@ export async function buildAgentProjectContext(
       metadata: (finding.metadata || {}) as Record<string, unknown>,
     })),
     bindings: normalizedBindings,
+    serp_evidence: (serpEvidence || []).map((item) => ({
+      ...item,
+      result: (item.result || {}) as Record<string, unknown>,
+    })),
     repositories: repositories || [],
     latest_crawl: latestCrawl
       ? {
@@ -233,6 +253,7 @@ export function contextToPrompt(context: AgentProjectContext) {
     open_findings: context.findings,
     connected_resources: context.bindings,
     repository_bindings: context.repositories,
+    latest_serp_evidence: context.serp_evidence,
     latest_crawl: context.latest_crawl,
   };
 
