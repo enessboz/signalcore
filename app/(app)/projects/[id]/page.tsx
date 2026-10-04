@@ -4,7 +4,7 @@ import { ProjectTypeBadge } from "@/components/project-type-badge";
 import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectType } from "@/lib/domain/types";
-import { addBackgroundSource, bindGoogleResource } from "./actions";
+import { addBackgroundSource, bindGoogleResource, queueGoogleBackfill, setGoogleAutoSync } from "./actions";
 
 type Resource = {
   id: string;
@@ -20,6 +20,7 @@ type Binding = {
   id: string;
   binding_type: "gsc" | "ga4";
   resource_id: string;
+  auto_sync_enabled: boolean;
 };
 
 export default async function ProjectPage({
@@ -46,6 +47,8 @@ export default async function ProjectPage({
     { data: googleConnection },
     { data: resources },
     { data: bindings },
+    { data: syncStates },
+    { data: syncQueue },
   ] = await Promise.all([
     supabase.from("project_sources").select("id", { count: "exact", head: true }).eq("project_id", id),
     supabase.from("project_facts").select("id", { count: "exact", head: true }).eq("project_id", id),
@@ -66,8 +69,20 @@ export default async function ProjectPage({
       .order("display_name"),
     supabase
       .from("project_bindings")
-      .select("id,binding_type,resource_id")
+      .select("id,binding_type,resource_id,auto_sync_enabled")
       .eq("project_id", id),
+    supabase
+      .from("google_sync_states")
+      .select("source,dataset,status,last_complete_date,last_success_at,rows_total,last_error")
+      .eq("project_id", id)
+      .order("source")
+      .order("dataset"),
+    supabase
+      .from("google_sync_queue")
+      .select("id,source,mode,start_date,end_date,cursor_date,status,error,created_at")
+      .eq("project_id", id)
+      .order("created_at", { ascending: false })
+      .limit(6),
   ]);
 
   const googleResources = (resources || []) as Resource[];
@@ -80,6 +95,8 @@ export default async function ProjectPage({
   const addSource = addBackgroundSource.bind(null, id);
   const bindGsc = bindGoogleResource.bind(null, id, "gsc");
   const bindGa4 = bindGoogleResource.bind(null, id, "ga4");
+  const queueGscBackfill = queueGoogleBackfill.bind(null, id, "gsc");
+  const queueGa4Backfill = queueGoogleBackfill.bind(null, id, "ga4");
 
   return (
     <div className="page">
@@ -167,6 +184,106 @@ export default async function ProjectPage({
                 <button className="secondaryButton" type="submit">Save GA4 property</button>
               </form>
             </div>
+
+            <div className="syncControlGrid">
+              <div className="syncControlCard">
+                <div>
+                  <strong>GSC warehouse sync</strong>
+                  <span>
+                    {gscBinding
+                      ? gscBinding.auto_sync_enabled
+                        ? "Auto sync enabled"
+                        : "Property connected · auto sync off"
+                      : "Select a GSC property first"}
+                  </span>
+                </div>
+                <div className="buttonRow">
+                  {gscBinding ? (
+                    <form action={setGoogleAutoSync.bind(null, id, "gsc", !gscBinding.auto_sync_enabled)}>
+                      <button className="secondaryButton" type="submit">
+                        {gscBinding.auto_sync_enabled ? "Disable Auto Sync" : "Enable Auto Sync"}
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+                {gscBinding ? (
+                  <form className="syncBackfillForm" action={queueGscBackfill}>
+                    <label>
+                      Backfill
+                      <select name="days" defaultValue="90">
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="180">180 days</option>
+                      </select>
+                    </label>
+                    <button className="ghostButton" type="submit">Queue GSC backfill</button>
+                  </form>
+                ) : null}
+              </div>
+
+              <div className="syncControlCard">
+                <div>
+                  <strong>GA4 warehouse sync</strong>
+                  <span>
+                    {ga4Binding
+                      ? ga4Binding.auto_sync_enabled
+                        ? "Auto sync enabled"
+                        : "Property connected · auto sync off"
+                      : "Select a GA4 property first"}
+                  </span>
+                </div>
+                <div className="buttonRow">
+                  {ga4Binding ? (
+                    <form action={setGoogleAutoSync.bind(null, id, "ga4", !ga4Binding.auto_sync_enabled)}>
+                      <button className="secondaryButton" type="submit">
+                        {ga4Binding.auto_sync_enabled ? "Disable Auto Sync" : "Enable Auto Sync"}
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+                {ga4Binding ? (
+                  <form className="syncBackfillForm" action={queueGa4Backfill}>
+                    <label>
+                      Backfill
+                      <select name="days" defaultValue="90">
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="180">180 days</option>
+                      </select>
+                    </label>
+                    <button className="ghostButton" type="submit">Queue GA4 backfill</button>
+                  </form>
+                ) : null}
+              </div>
+            </div>
+
+            {(syncStates?.length || syncQueue?.length) ? (
+              <div className="syncStatusPanel">
+                <div className="syncStateList">
+                  {(syncStates || []).map((state) => (
+                    <div className="syncStateRow" key={`${state.source}-${state.dataset}`}>
+                      <div>
+                        <strong>{state.source.toUpperCase()} · {state.dataset.replaceAll("_", " ")}</strong>
+                        <span>{state.last_complete_date || "No completed date yet"}</span>
+                      </div>
+                      <small className={`jobStatus job-${state.status}`}>{state.status}</small>
+                    </div>
+                  ))}
+                </div>
+
+                {(syncQueue || []).length ? (
+                  <div className="syncQueueList">
+                    {(syncQueue || []).map((job) => (
+                      <div className="syncQueueRow" key={job.id}>
+                        <span>{job.source.toUpperCase()} · {job.mode}</span>
+                        <strong>{job.start_date} → {job.end_date}</strong>
+                        <small className={`jobStatus job-${job.status}`}>{job.status}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="buttonRow">
               <Link href={`/projects/${id}/search-console`} className="secondaryButton inlineLink">
