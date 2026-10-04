@@ -1,4 +1,5 @@
 import { decryptCredential, encryptCredential } from "@/lib/security/credential-crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 type CredentialRow = {
@@ -8,8 +9,8 @@ type CredentialRow = {
   expires_at: string | null;
 };
 
-export async function getGoogleAccessToken() {
-  const supabase = await createClient();
+export async function getGoogleAccessToken(client?: SupabaseClient) {
+  const supabase = client || (await createClient());
 
   const { data: connection, error: connectionError } = await supabase
     .from("connections")
