@@ -340,3 +340,114 @@ button, input, textarea { font: inherit; }
   .agentCards { grid-template-columns: 1fr; }
   .agentFlowGroup { grid-template-columns: 1fr; }
 }
+
+.commandLayout { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 16px; align-items: start; }
+.commandSidebar { display: grid; gap: 16px; }
+.commandMain { display: grid; gap: 16px; }
+.commandThreadsPanel { max-height: 430px; overflow: hidden; }
+.commandThreadList, .commandScheduleList, .commandActionList { display: grid; }
+.commandThread { display: grid; gap: 3px; padding: 10px; border-top: 1px solid var(--line); border-radius: 7px; color: var(--text); }
+.commandThread:hover, .commandThread.active { background: var(--surface-2); }
+.commandThread strong { font-size: 9px; line-height: 1.4; }
+.commandThread span { color: var(--muted); font-size: 8px; }
+.commandScheduleRow, .commandActionRow { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.commandScheduleRow > div, .commandActionRow > div { display: grid; gap: 3px; min-width: 0; }
+.commandScheduleRow strong, .commandActionRow strong { font-size: 9px; }
+.commandScheduleRow span, .commandActionRow span, .commandActionRow small { color: var(--muted); font-size: 8px; }
+.commandScheduleRow small { text-transform: uppercase; font-size: 7px; font-weight: 700; }
+
+.commandChat { padding: 0; overflow: hidden; min-height: 680px; display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; }
+.commandChatHeader { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: #fafbfc; }
+.chiefAvatar { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--dark); color: white; font-size: 9px; font-weight: 800; }
+.chiefAvatar.large { width: 52px; height: 52px; font-size: 12px; border-radius: 14px; }
+.commandChatHeader > div:last-child { display: grid; gap: 2px; }
+.commandChatHeader strong { font-size: 10px; }
+.commandChatHeader span { color: var(--muted); font-size: 8px; }
+.commandMessages { padding: 18px; overflow-y: auto; max-height: 680px; background: #fcfcfd; }
+.commandMessage { max-width: 82%; border-radius: 12px; padding: 11px 13px; margin-bottom: 12px; }
+.commandMessage p { margin: 4px 0 0; white-space: pre-wrap; font-size: 10px; line-height: 1.6; }
+.userMessage { margin-left: auto; background: var(--dark); color: white; }
+.assistantMessage { background: white; border: 1px solid var(--line); }
+.commandMessageMeta { display: flex; justify-content: space-between; gap: 12px; font-size: 8px; }
+.userMessage .commandMessageMeta span { color: #c7cbd1; }
+.assistantMessage .commandMessageMeta span { color: var(--muted); }
+.commandWelcome { min-height: 430px; display: grid; place-items: center; align-content: center; text-align: center; max-width: 760px; margin: 0 auto; }
+.commandWelcome h2 { margin: 12px 0 5px; font-size: 20px; }
+.commandWelcome > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; max-width: 600px; }
+.quickPromptGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-top: 18px; width: 100%; text-align: left; }
+.quickPromptCard { border: 1px solid var(--line); background: white; border-radius: 9px; padding: 10px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.commandComposer { padding: 12px 14px; border-top: 1px solid var(--line); background: white; }
+.commandComposer textarea { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font: inherit; }
+.commandComposerFoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
+.commandComposerFoot span { color: var(--muted); font-size: 8px; max-width: 560px; }
+.commandActionStatus { display: inline-flex; width: fit-content; padding: 3px 6px; border-radius: 999px; font-size: 7px !important; font-weight: 700; text-transform: uppercase; }
+.commandAction-completed { background: #ecfdf3; color: #067647 !important; }
+.commandAction-failed { background: #fff1f2; color: #b42318 !important; }
+.commandAction-planned, .commandAction-awaiting_approval { background: #fff7ed; color: #b54708 !important; }
+
+.teamLegend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 16px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--muted); font-size: 9px; }
+.teamLegend > div { display: flex; align-items: center; gap: 5px; }
+.legendDot { width: 7px; height: 7px; border-radius: 999px; }
+.legendDot.working { background: #12b76a; }
+.legendDot.idle { background: #98a2b3; }
+.legendDot.attention { background: #f04438; }
+
+.orgChart { border: 1px solid var(--line); background: #f8f9fb; border-radius: 14px; padding: 22px 18px 26px; margin-bottom: 16px; overflow-x: auto; }
+.orgLevel { width: min(520px, 100%); margin: 0 auto; }
+.orgConnector.vertical { width: 1px; height: 24px; background: #cfd4dc; margin: 0 auto; }
+.orgSpecialistWrap { min-width: 920px; position: relative; padding-top: 24px; }
+.orgHorizontalLine { position: absolute; left: 7%; right: 7%; top: 0; height: 1px; background: #cfd4dc; }
+.orgSpecialistGrid { display: grid; grid-template-columns: repeat(4,minmax(210px,1fr)); gap: 10px; }
+.orgSpecialistNode { position: relative; padding-top: 16px; }
+.orgNodeStem { position: absolute; width: 1px; height: 16px; background: #cfd4dc; top: 0; left: 50%; }
+.teamAgentCard { border: 1px solid var(--line); border-radius: 11px; background: white; padding: 12px; box-shadow: 0 1px 2px rgba(16,24,40,.03); }
+.teamAgentCard.featured { border-color: #b9c9ee; box-shadow: 0 3px 10px rgba(53,56,205,.06); }
+.teamAgentHeader { display: flex; justify-content: space-between; gap: 10px; }
+.teamAgentIdentity { display: flex; align-items: center; gap: 8px; }
+.teamAgentAvatar { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: #eef4ff; color: #3538cd; font-size: 8px; font-weight: 800; }
+.teamAgentIdentity h3 { margin: 2px 0 0; font-size: 11px; }
+.teamRuntime { display: inline-flex; height: fit-content; padding: 4px 6px; border-radius: 999px; font-size: 7px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+.teamWorking { background: #ecfdf3; color: #067647; }
+.teamIdle { background: #f2f4f7; color: #475467; }
+.teamAttention { background: #fff1f2; color: #b42318; }
+.teamAgentDescription { color: var(--muted); font-size: 8px; line-height: 1.45; min-height: 46px; }
+.teamAgentTask { border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 9px; display: grid; gap: 3px; }
+.teamAgentTask span, .teamAgentTask small { color: var(--muted); font-size: 7px; }
+.teamAgentTask strong { font-size: 8px; line-height: 1.45; }
+.teamAgentFooter { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; margin-top: 8px; }
+.teamAgentFooter > div { display: grid; gap: 2px; }
+.teamAgentFooter span { color: var(--muted); font-size: 7px; }
+.teamAgentFooter strong { font-size: 8px; overflow-wrap: anywhere; }
+.teamCapabilityLine { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.teamCapabilityLine span { background: #f2f4f7; color: #475467; border-radius: 999px; padding: 3px 5px; font-size: 6px; }
+.teamLowerGrid { margin-top: 0; }
+.teamActivityList, .teamHandoffList, .teamExecutiveList { display: grid; }
+.teamActivityRow { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.activityAgentBadge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: #f2f4f7; color: #344054; font-size: 7px; font-weight: 800; }
+.teamActivityCopy { min-width: 0; display: grid; gap: 2px; }
+.teamActivityCopy strong { font-size: 9px; }
+.teamActivityCopy span { color: var(--muted); font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.teamActivityMeta { display: grid; justify-items: end; gap: 3px; }
+.teamActivityMeta small { color: var(--muted); font-size: 7px; }
+.teamHandoffRow { border-top: 1px solid var(--line); padding: 9px 0; display: grid; gap: 3px; }
+.teamHandoffRow strong { font-size: 8px; }
+.teamHandoffRow p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.teamHandoffRow span { color: #b54708; font-size: 7px; text-transform: uppercase; }
+.teamExecutiveRow { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding: 8px 0; }
+.teamExecutiveRow > div { display: grid; gap: 2px; }
+.teamExecutiveRow strong { font-size: 8px; }
+.teamExecutiveRow span, .teamExecutiveRow small { color: var(--muted); font-size: 7px; }
+
+@media (max-width: 1000px) {
+  .commandLayout { grid-template-columns: 1fr; }
+  .commandSidebar { grid-template-columns: 1fr 1fr; }
+  .orgSpecialistGrid { grid-template-columns: repeat(2,minmax(240px,1fr)); }
+  .orgSpecialistWrap { min-width: 600px; }
+}
+@media (max-width: 680px) {
+  .commandSidebar { grid-template-columns: 1fr; }
+  .quickPromptGrid { grid-template-columns: 1fr; }
+  .commandMessage { max-width: 95%; }
+  .commandComposerFoot { align-items: stretch; flex-direction: column; }
+  .commandComposerFoot button { width: 100%; }
+}
