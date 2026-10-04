@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
       });
 
       const runStatus =
+        Boolean(crawl.summary.runtime_limited) ||
         Number(crawl.summary.fetch_or_http_errors || 0) > 0
           ? "partial"
           : "succeeded";
