@@ -793,8 +793,10 @@ export async function executeChiefActions(input: {
       if (action.type === "queue_google_backfill") {
         const source = action.data_source;
         const days = action.backfill_days;
-        if (!source || !days || ![30, 90, 180].includes(days)) {
-          throw new Error("Backfill requires GSC/GA4 source and 30, 90 or 180 days.");
+        if (!source || !days || ![30, 90, 180, 480].includes(days)) {
+          throw new Error(
+            "Backfill requires GSC/GA4 source and 30, 90, 180 or 480 days.",
+          );
         }
 
         const { data: binding, error: bindingError } = await supabase
