@@ -1264,11 +1264,13 @@ export async function runProjectCrawl(input: {
   maxUrls?: number;
   crawlType?: CrawlType;
   maxRuntimeMs?: number;
+  sitemapOffset?: number;
   client?: SupabaseClient;
 }) {
   const supabase = input.client || (await createClient());
   const maxUrls = Math.min(Math.max(input.maxUrls || 100, 1), 500);
   const crawlType = input.crawlType || "http";
+  const sitemapOffset = Math.max(Number(input.sitemapOffset || 0), 0);
   const startedAtMs = Date.now();
   const maxRuntimeMs = Math.min(
     Math.max(input.maxRuntimeMs || 210_000, 30_000),
@@ -1315,6 +1317,7 @@ export async function runProjectCrawl(input: {
     const discovery = await discoverSitemapUrls(
       seedUrl,
       Math.min(maxUrls * 3, 1500),
+      { skipUrls: sitemapOffset },
     );
 
     const crawlResult = await crawlWithDiscovery({
@@ -1565,6 +1568,10 @@ export async function runProjectCrawl(input: {
           ? "max_urls"
           : "discovery_exhausted",
       sitemap_count: discovery.sitemapCount,
+      sitemap_offset: discovery.sitemapOffset,
+      next_sitemap_offset: discovery.nextSitemapOffset,
+      sitemap_scan_exhausted: discovery.scanExhausted,
+      sitemap_valid_urls_seen: discovery.validUrlsSeen,
       sitemap_urls_discovered: discovery.sitemapUrls.length,
       sitemap_urls_not_crawled_in_sample: Math.max(
         discovery.sitemapUrls.length -
