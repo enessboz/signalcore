@@ -69,3 +69,11 @@ button, input, textarea { font: inherit; }
 .formMessage { margin: 0; padding: 10px 12px; border-radius: 8px; font-size: 11px; }.formError { background: #fff1f2; color: #b42318; }.formSuccess { background: #ecfdf3; color: #067647; }
 @media (max-width: 980px) { .appShell { grid-template-columns: 1fr; }.sidebar { position: static; height: auto; }.sidebar nav { grid-template-columns: repeat(3, 1fr); }.sidebarFoot { display: none; }.statsGrid, .foundationGrid { grid-template-columns: repeat(2,1fr); }.twoCol { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .page { padding: 24px 16px 40px; }.pageHeader { flex-direction: column; }.statsGrid, .foundationGrid, .typeGrid { grid-template-columns: 1fr; }.sidebar nav { grid-template-columns: repeat(2,1fr); }.tableRow { grid-template-columns: 1fr 1fr; }.projectRow { grid-template-columns: 1fr auto; }.projectMeta { grid-column: 1 / -1; text-align: left; } }
+
+.pageMessage { margin: -10px 0 16px; }
+.sourceList { display: grid; }
+.sourceRow { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
+.sourceRow > div { display: grid; gap: 3px; }
+.sourceRow strong { font-size: 12px; }
+.sourceRow span, .sourceRow small { color: var(--muted); font-size: 10px; }
+.smallEmpty { min-height: 180px; }
