@@ -91,6 +91,7 @@ export default async function SearchConsolePage({
     { data: savedViews },
     { data: warehouseStates },
     { data: queryPageInsightData },
+    { data: coverageData },
   ] = await Promise.all([
     supabase
       .from("saved_analytics_views")
@@ -110,6 +111,10 @@ export default async function SearchConsolePage({
       p_min_impressions: 100,
       p_limit: 50,
     }),
+    supabase.rpc("get_warehouse_coverage", {
+      p_project_id: id,
+      p_days: 28,
+    }),
   ]);
 
   const warehouseStateMap = new Map(
@@ -123,6 +128,10 @@ export default async function SearchConsolePage({
   const urlSwitches = Array.isArray(queryPageInsights.url_switches)
     ? (queryPageInsights.url_switches as Array<Record<string, unknown>>)
     : [];
+  const warehouseCoverage =
+    (coverageData || {}) as Record<string, Record<string, unknown>>;
+  const gscCoverage = warehouseCoverage.gsc || {};
+  const queryPageCoverage = warehouseCoverage.gsc_query_page || {};
 
   const presetKey = PRESETS[scalar(query.view, "queries")]
     ? scalar(query.view, "queries")
@@ -264,7 +273,22 @@ export default async function SearchConsolePage({
               <strong>{state?.last_complete_date || "—"}</strong>
               <small>
                 {state
-                  ? String(state.rows_total || 0) + " rows · " + state.status
+                  ? String(state.rows_total || 0) +
+                    " rows · " +
+                    state.status +
+                    (dataset === "query_page_daily"
+                      ? " · " +
+                        String(queryPageCoverage.current_days || 0) +
+                        "/28 current · " +
+                        String(queryPageCoverage.previous_days || 0) +
+                        "/28 previous"
+                      : dataset === "query_daily"
+                        ? " · " +
+                          String(gscCoverage.current_days || 0) +
+                          "/28 current · " +
+                          String(gscCoverage.previous_days || 0) +
+                          "/28 previous"
+                        : "")
                   : "Not synced yet"}
               </small>
             </article>
@@ -461,7 +485,11 @@ export default async function SearchConsolePage({
             <div className="panelHeader">
               <div>
                 <h2>Query ownership evidence</h2>
-                <p>Warehouse-only signals. Review before calling anything cannibalization.</p>
+                <p>
+                  Warehouse-only signals. Review before calling anything cannibalization.
+                  Current query×page coverage: {String(queryPageCoverage.current_days || 0)}/28 days;
+                  previous: {String(queryPageCoverage.previous_days || 0)}/28.
+                </p>
               </div>
             </div>
             {ownershipSplits.length || urlSwitches.length ? (
