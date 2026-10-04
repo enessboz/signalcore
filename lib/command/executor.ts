@@ -579,6 +579,8 @@ export async function executeChiefActions(input: {
           "assign_output_profile",
           "set_budget_limit",
           "convert_project_to_client",
+          "create_technical_crawl_schedule",
+          "manage_technical_crawl_schedule",
         ].includes(action.type) &&
         !projectId
       ) {
@@ -829,6 +831,154 @@ export async function executeChiefActions(input: {
           projectId,
           summary: `${source.toUpperCase()} ${days}-day backfill queued.`,
           data: { source, days, job_id: jobId, start_date: startDate, end_date: endDate },
+        });
+        continue;
+      }
+
+      if (action.type === "create_technical_crawl_schedule") {
+        const title =
+          action.schedule_name?.trim() ||
+          (action.crawl_mode === "delta"
+            ? "Daily Delta Crawl"
+            : "Weekly Full Crawl");
+        const kind = action.schedule_kind;
+        const crawlMode = action.crawl_mode || "http";
+
+        if (!kind || kind === "once") {
+          throw new Error(
+            "Technical crawl schedules require daily, weekly or monthly cadence.",
+          );
+        }
+        if (!action.time_local) {
+          throw new Error("Technical crawl schedule requires time_local.");
+        }
+        if (kind === "weekly" && !(action.days_of_week || []).length) {
+          throw new Error("Weekly technical crawl requires days_of_week.");
+        }
+
+        const scheduleConfig = {
+          time_local: action.time_local,
+          days_of_week: kind === "weekly" ? action.days_of_week || [] : [],
+          day_of_month: kind === "monthly" ? action.day_of_month || 1 : null,
+        };
+
+        const { data: schedule, error } = await supabase
+          .from("technical_crawl_schedules")
+          .upsert(
+            {
+              owner_id: input.ownerId,
+              project_id: projectId!,
+              name: title,
+              crawl_type: crawlMode,
+              max_urls: Math.min(
+                Math.max(action.max_urls || (crawlMode === "delta" ? 50 : 500), 1),
+                500,
+              ),
+              schedule_kind: kind,
+              schedule_config: scheduleConfig,
+              timezone: action.timezone || "Europe/Istanbul",
+              status: "active",
+              last_status: "idle",
+              last_error: null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "project_id,name" },
+          )
+          .select("id,name,crawl_type,max_urls")
+          .single();
+
+        if (error || !schedule) {
+          throw new Error(
+            error?.message || "Technical crawl schedule could not be created.",
+          );
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Saved " +
+            schedule.name +
+            " (" +
+            schedule.crawl_type +
+            ", " +
+            String(schedule.max_urls) +
+            " URLs).",
+          data: {
+            schedule_id: schedule.id,
+            crawl_mode: schedule.crawl_type,
+            max_urls: schedule.max_urls,
+            schedule: scheduleConfig,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "manage_technical_crawl_schedule") {
+        const scheduleName = action.schedule_name?.trim();
+        const status = action.schedule_status;
+
+        if (!scheduleName || !status) {
+          throw new Error(
+            "Technical crawl schedule name and desired status are required.",
+          );
+        }
+
+        const { data: schedules, error: scheduleError } = await supabase
+          .from("technical_crawl_schedules")
+          .select("id,name,status")
+          .eq("owner_id", input.ownerId)
+          .eq("project_id", projectId!)
+          .neq("status", "cancelled");
+
+        if (scheduleError) throw new Error(scheduleError.message);
+
+        const normalized = scheduleName.toLowerCase();
+        const matches = (schedules || []).filter((schedule) => {
+          const name = schedule.name.trim().toLowerCase();
+          return name === normalized || name.includes(normalized);
+        });
+        const target =
+          matches.length === 1
+            ? matches[0]
+            : (schedules || []).find(
+                (schedule) =>
+                  schedule.name.trim().toLowerCase() === normalized,
+              );
+
+        if (!target) {
+          throw new Error(
+            'Technical crawl schedule "' +
+              scheduleName +
+              '" could not be uniquely resolved.',
+          );
+        }
+
+        const { error } = await supabase
+          .from("technical_crawl_schedules")
+          .update({
+            status,
+            last_status: status === "paused" ? "paused" : undefined,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", target.id)
+          .eq("owner_id", input.ownerId)
+          .eq("project_id", projectId!);
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            'Technical crawl schedule "' +
+            target.name +
+            '" is now ' +
+            status +
+            ".",
+          data: { schedule_id: target.id, status },
         });
         continue;
       }
