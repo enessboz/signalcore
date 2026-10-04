@@ -5,6 +5,7 @@ import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import {
+  reviewCrawlFinding,
   runTechnicalCrawl,
   saveTechnicalCrawlSchedule,
   setTechnicalCrawlScheduleStatus,
@@ -20,6 +21,25 @@ function yesNo(value: boolean | null | undefined) {
   if (value === true) return "Yes";
   if (value === false) return "No";
   return "—";
+}
+
+function formatBytes(value: number | null | undefined) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  if (bytes < 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function formatDuration(value: number | null | undefined) {
+  const ms = Number(value || 0);
+  if (!ms) return "—";
+  if (ms < 60_000) return (ms / 1000).toFixed(1) + " s";
+  if (ms < 3_600_000) return (ms / 60_000).toFixed(1) + " min";
+  return (ms / 3_600_000).toFixed(2) + " h";
 }
 
 function compactUrl(value: string | null | undefined) {
@@ -134,6 +154,35 @@ export default async function TechnicalAuditPage({
     sitemap_urls: unknown;
     error: string | null;
   } = null;
+  let benchmark: null | {
+    run_id: string;
+    status: string;
+    execution_mode: string;
+    max_urls: number;
+    pages_discovered: number;
+    pages_crawled: number;
+    error_count: number;
+    duration_ms: number | null;
+    pages_per_minute: number | null;
+    page_rows: number;
+    page_bytes: number;
+    link_rows: number;
+    link_bytes: number;
+    estimated_run_bytes: number;
+    rendered_pages: number;
+    performance_samples: number;
+    finding_count: number;
+    reviewed_findings: number;
+    confirmed_findings: number;
+    false_positive_findings: number;
+    needs_context_findings: number;
+    false_positive_ratio: number | null;
+  } = null;
+  const findingReviews = new Map<
+    string,
+    { verdict: string; note: string | null }
+  >();
+
   let performanceResults: Array<{
     id: string;
     url: string;
@@ -158,6 +207,8 @@ export default async function TechnicalAuditPage({
       externalLinks,
       robotsResult,
       performanceResult,
+      benchmarkResult,
+      reviewResult,
     ] = await Promise.all([
       supabase
         .from("crawl_pages")
@@ -194,6 +245,13 @@ export default async function TechnicalAuditPage({
         .eq("crawl_run_id", selectedRun.id)
         .order("fetched_at", { ascending: false })
         .limit(100),
+      supabase.rpc("get_crawl_run_benchmark", {
+        p_run_id: selectedRun.id,
+      }),
+      supabase
+        .from("crawl_finding_reviews")
+        .select("finding_id,verdict,note")
+        .eq("crawl_run_id", selectedRun.id),
     ]);
 
     pages = (pageResult.data || []) as typeof pages;
@@ -211,6 +269,13 @@ export default async function TechnicalAuditPage({
       error: string | null;
     };
     performanceResults = (performanceResult.data || []) as typeof performanceResults;
+    benchmark = (benchmarkResult.data || null) as typeof benchmark;
+    for (const review of reviewResult.data || []) {
+      findingReviews.set(review.finding_id, {
+        verdict: review.verdict,
+        note: review.note,
+      });
+    }
   }
 
   const summary = (selectedRun?.summary || {}) as Record<string, unknown>;
@@ -271,11 +336,11 @@ export default async function TechnicalAuditPage({
             <h2>Run controlled raw HTTP crawl</h2>
             <p>
               SignalCore follows internal links from the homepage first and uses
-              sitemap URLs for additional coverage. Runs up to 500 URLs execute
-              inline; 1K–10K runs use the resumable distributed frontier.
+              sitemap URLs for additional coverage. Every new crawl uses the same
+              resumable distributed frontier, from 25 URLs up to the 10K production target.
             </p>
           </div>
-          <span className="sourceBadge">Raw HTTP V2</span>
+          <span className="sourceBadge">Distributed HTTP V3</span>
         </div>
 
         <form className="crawlRunForm" action={runTechnicalCrawl.bind(null, id)}>
@@ -594,6 +659,77 @@ export default async function TechnicalAuditPage({
             </article>
           </section>
 
+          <section className="panel">
+            <div className="panelHeader">
+              <div>
+                <h2>Production crawl benchmark</h2>
+                <p>
+                  Run-level throughput, storage growth and manually reviewed finding quality.
+                  Use this panel for the required 100 and 500 URL production acceptance tests.
+                </p>
+              </div>
+              <span className="sourceBadge">
+                {benchmark?.execution_mode || selectedRun.execution_mode || "queue"}
+              </span>
+            </div>
+            <div className="foundationGrid">
+              <div>
+                <strong>Duration</strong>
+                <span>{formatDuration(benchmark?.duration_ms)}</span>
+              </div>
+              <div>
+                <strong>Throughput</strong>
+                <span>
+                  {benchmark?.pages_per_minute === null ||
+                  benchmark?.pages_per_minute === undefined
+                    ? "—"
+                    : Number(benchmark.pages_per_minute).toFixed(2) + " pages/min"}
+                </span>
+              </div>
+              <div>
+                <strong>Page storage</strong>
+                <span>
+                  {formatBytes(benchmark?.page_bytes)} ·{" "}
+                  {Number(benchmark?.page_rows || 0).toLocaleString("en-US")} rows
+                </span>
+              </div>
+              <div>
+                <strong>Link storage</strong>
+                <span>
+                  {formatBytes(benchmark?.link_bytes)} ·{" "}
+                  {Number(benchmark?.link_rows || 0).toLocaleString("en-US")} rows
+                </span>
+              </div>
+              <div>
+                <strong>Measured DB payload</strong>
+                <span>{formatBytes(benchmark?.estimated_run_bytes)}</span>
+              </div>
+              <div>
+                <strong>Findings</strong>
+                <span>
+                  {Number(benchmark?.finding_count || 0)} total ·{" "}
+                  {Number(benchmark?.reviewed_findings || 0)} reviewed
+                </span>
+              </div>
+              <div>
+                <strong>False-positive rate</strong>
+                <span>
+                  {benchmark?.false_positive_ratio === null ||
+                  benchmark?.false_positive_ratio === undefined
+                    ? "Review findings to measure"
+                    : Number(benchmark.false_positive_ratio).toFixed(2) + "%"}
+                </span>
+              </div>
+              <div>
+                <strong>Rendered / PSI</strong>
+                <span>
+                  {Number(benchmark?.rendered_pages || 0)} JS ·{" "}
+                  {Number(benchmark?.performance_samples || 0)} PageSpeed samples
+                </span>
+              </div>
+            </div>
+          </section>
+
           {selectedRun.crawl_type === "delta" && deltaSummary ? (
             <section className="panel">
               <div className="panelHeader">
@@ -801,24 +937,68 @@ export default async function TechnicalAuditPage({
 
               {findings.length ? (
                 <div className="technicalFindingList">
-                  {findings.map((finding) => (
-                    <article className="technicalFindingRow" key={finding.id}>
-                      <div>
-                        <span
-                          className={
-                            "importance importance-" + finding.importance
-                          }
-                        >
-                          {finding.importance}
-                        </span>
-                        <strong>{finding.title}</strong>
-                      </div>
-                      <p>{finding.summary}</p>
-                      {finding.recommended_action ? (
-                        <small>{finding.recommended_action}</small>
-                      ) : null}
-                    </article>
-                  ))}
+                  {findings.map((finding) => {
+                    const review = findingReviews.get(finding.id);
+                    return (
+                      <article className="technicalFindingRow" key={finding.id}>
+                        <div>
+                          <span
+                            className={
+                              "importance importance-" + finding.importance
+                            }
+                          >
+                            {finding.importance}
+                          </span>
+                          <strong>{finding.title}</strong>
+                          {review ? (
+                            <span
+                              className={
+                                review.verdict === "false_positive"
+                                  ? "healthBad"
+                                  : review.verdict === "confirmed"
+                                    ? "healthGood"
+                                    : ""
+                              }
+                            >
+                              {review.verdict.replaceAll("_", " ")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p>{finding.summary}</p>
+                        {finding.recommended_action ? (
+                          <small>{finding.recommended_action}</small>
+                        ) : null}
+                        {review?.note ? <small>Review note: {review.note}</small> : null}
+                        <div className="buttonRow">
+                          {(["confirmed", "false_positive", "needs_context"] as const).map(
+                            (verdict) => (
+                              <form
+                                key={verdict}
+                                action={reviewCrawlFinding.bind(
+                                  null,
+                                  id,
+                                  selectedRun.id,
+                                  finding.id,
+                                  verdict,
+                                )}
+                              >
+                                <button
+                                  className={
+                                    review?.verdict === verdict
+                                      ? "secondaryButton"
+                                      : "ghostButton"
+                                  }
+                                  type="submit"
+                                >
+                                  {verdict.replaceAll("_", " ")}
+                                </button>
+                              </form>
+                            ),
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="emptyState smallEmpty">
