@@ -156,6 +156,7 @@ export async function sendChiefCommand(formData: FormData) {
         "add_project_background",
         "assign_output_profile",
         "set_budget_limit",
+        "convert_project_to_client",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
