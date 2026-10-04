@@ -332,6 +332,38 @@ async function updateSyncState(input: {
   }
 }
 
+async function updateSyncDateLog(input: {
+  supabase: SupabaseClient;
+  job: SyncJob;
+  date: string;
+  status: "succeeded" | "failed";
+  totalRows?: number;
+  datasetRows?: Record<string, number>;
+  attemptCount?: number;
+  lastError?: string | null;
+}) {
+  const now = new Date().toISOString();
+  const { error } = await input.supabase.from("google_sync_date_log").upsert(
+    {
+      project_id: input.job.project_id,
+      owner_id: input.job.owner_id,
+      source: input.job.source,
+      date: input.date,
+      status: input.status,
+      total_rows: Number(input.totalRows || 0),
+      dataset_rows: input.datasetRows || {},
+      attempt_count: Number(input.attemptCount || 0),
+      last_error: input.lastError || null,
+      last_attempt_at: now,
+      succeeded_at: input.status === "succeeded" ? now : null,
+      updated_at: now,
+    },
+    { onConflict: "project_id,source,date" },
+  );
+
+  if (error) throw new Error("Sync date log update failed: " + error.message);
+}
+
 export async function processGoogleSyncJob(
   job: SyncJob,
   client?: SupabaseClient,
@@ -400,6 +432,17 @@ export async function processGoogleSyncJob(
       datasetRows,
     });
 
+    await updateSyncDateLog({
+      supabase,
+      job,
+      date,
+      status: "succeeded",
+      totalRows,
+      datasetRows,
+      attemptCount: 0,
+      lastError: null,
+    });
+
     const nextDate = addDays(date, 1);
     const completed = nextDate > job.end_date;
 
@@ -438,6 +481,17 @@ export async function processGoogleSyncJob(
         completed_at: terminalFailure ? new Date().toISOString() : null,
       })
       .eq("id", job.id);
+
+    await updateSyncDateLog({
+      supabase,
+      job,
+      date,
+      status: "failed",
+      totalRows: 0,
+      datasetRows: {},
+      attemptCount,
+      lastError: message,
+    });
 
     const datasets =
       job.source === "gsc"
