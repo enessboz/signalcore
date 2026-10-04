@@ -16,6 +16,13 @@ type ChiefAction = {
     | "add_project_background"
     | "assign_output_profile"
     | "set_budget_limit"
+    | "create_sales_campaign"
+    | "run_sales_campaign"
+    | "qualify_sales_campaign"
+    | "configure_sales_automation"
+    | "convert_sales_lead"
+    | "audit_sales_lead"
+    | "create_sales_deck"
     | "no_action";
   project_ref: string | null;
   project_type: "owned" | "client" | "lead_prospect" | null;
@@ -59,6 +66,17 @@ type ChiefAction = {
   monthly_limit: number | null;
   soft_warning_percent: number | null;
   hard_stop: boolean | null;
+  campaign_ref: string | null;
+  campaign_name: string | null;
+  lead_ref: string | null;
+  sales_queries: string[];
+  exclusions: string[];
+  country: string | null;
+  industry: string | null;
+  min_score: number | null;
+  max_candidates: number | null;
+  max_run_cost: number | null;
+  auto_qualify_count: number | null;
 };
 
 export type ChiefPlan = {
@@ -139,6 +157,17 @@ const actionSchema = {
     "monthly_limit",
     "soft_warning_percent",
     "hard_stop",
+    "campaign_ref",
+    "campaign_name",
+    "lead_ref",
+    "sales_queries",
+    "exclusions",
+    "country",
+    "industry",
+    "min_score",
+    "max_candidates",
+    "max_run_cost",
+    "auto_qualify_count",
   ],
   properties: {
     type: {
@@ -160,6 +189,13 @@ const actionSchema = {
         "add_project_background",
         "assign_output_profile",
         "set_budget_limit",
+        "create_sales_campaign",
+        "run_sales_campaign",
+        "qualify_sales_campaign",
+        "configure_sales_automation",
+        "convert_sales_lead",
+        "audit_sales_lead",
+        "create_sales_deck",
         "no_action",
       ],
     },
@@ -243,6 +279,17 @@ const actionSchema = {
     monthly_limit: { type: ["number", "null"], minimum: 0 },
     soft_warning_percent: { type: ["integer", "null"], minimum: 1, maximum: 100 },
     hard_stop: { type: ["boolean", "null"] },
+    campaign_ref: { type: ["string", "null"] },
+    campaign_name: { type: ["string", "null"] },
+    lead_ref: { type: ["string", "null"] },
+    sales_queries: { type: "array", maxItems: 20, items: { type: "string" } },
+    exclusions: { type: "array", maxItems: 50, items: { type: "string" } },
+    country: { type: ["string", "null"] },
+    industry: { type: ["string", "null"] },
+    min_score: { type: ["integer", "null"], minimum: 0, maximum: 100 },
+    max_candidates: { type: ["integer", "null"], minimum: 1, maximum: 1000 },
+    max_run_cost: { type: ["number", "null"], minimum: 0 },
+    auto_qualify_count: { type: ["integer", "null"], minimum: 0, maximum: 10 },
   },
 };
 
@@ -295,7 +342,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, and configure project AI/SERP/browser monthly budgets. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
