@@ -572,7 +572,7 @@ function pageRow(input: {
     content_simhash: input.page.contentSimhash,
     indexable: input.page.indexable,
     indexability_reason: input.page.indexabilityReason,
-    crawl_depth: input.queue.depth,
+    crawl_depth: input.queue.source === "sitemap" ? null : input.queue.depth,
     inlink_count: 0,
     sitemap_present: input.queue.source === "sitemap",
     orphan_candidate: false,
