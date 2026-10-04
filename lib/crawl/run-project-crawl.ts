@@ -12,6 +12,7 @@ type CrawlFinding = {
   fingerprint: string;
   title: string;
   summary: string;
+  findingType?: "issue" | "regression";
   importance: "critical" | "high" | "medium" | "low";
   affectedScope: Record<string, unknown>;
   recommendedAction: string;
@@ -524,6 +525,207 @@ function redirectInternalLinkFindings(states: PageGraphState[]): CrawlFinding[] 
   }));
 }
 
+
+type PreviousPageSnapshot = {
+  requested_url: string | null;
+  url: string;
+  final_url: string | null;
+  status_code: number | null;
+  title: string | null;
+  canonical: string | null;
+  indexable: boolean | null;
+  indexability_reason: string | null;
+  content_hash: string | null;
+};
+
+function compareDelta(
+  states: PageGraphState[],
+  previousPages: PreviousPageSnapshot[],
+) {
+  const previousByUrl = new Map<string, PreviousPageSnapshot>();
+  for (const page of previousPages) {
+    const key = normalizeUrl(page.requested_url || page.url);
+    previousByUrl.set(key, page);
+  }
+
+  const changed = new Set<string>();
+  const newUrls: string[] = [];
+  const contentChanges: string[] = [];
+  const statusChanges: Array<{ url: string; from: number | null; to: number | null }> = [];
+  const titleChanges: Array<{ url: string; from: string | null; to: string | null }> = [];
+  const canonicalChanges: Array<{ url: string; from: string | null; to: string | null }> = [];
+  const indexabilityChanges: Array<{
+    url: string;
+    from: boolean | null;
+    to: boolean | null;
+    from_reason: string | null;
+    to_reason: string | null;
+  }> = [];
+  const regressionFindings: CrawlFinding[] = [];
+
+  for (const state of states) {
+    const key = state.requestedNormalized;
+    const previous = previousByUrl.get(key);
+
+    if (!previous) {
+      changed.add(key);
+      newUrls.push(state.page.requestedUrl);
+      continue;
+    }
+
+    const page = state.page;
+    const changes: string[] = [];
+
+    if (previous.content_hash && page.contentHash && previous.content_hash !== page.contentHash) {
+      changes.push("content");
+      contentChanges.push(page.requestedUrl);
+    }
+
+    if (previous.status_code !== page.statusCode) {
+      changes.push("status");
+      statusChanges.push({
+        url: page.requestedUrl,
+        from: previous.status_code,
+        to: page.statusCode,
+      });
+
+      if (
+        previous.status_code !== null &&
+        previous.status_code < 400 &&
+        page.statusCode !== null &&
+        page.statusCode >= 400
+      ) {
+        regressionFindings.push({
+          fingerprint: "crawl:regression-status:" + findingKey(page.requestedUrl),
+          findingType: "regression",
+          title: "HTTP status regression",
+          summary:
+            page.requestedUrl +
+            " changed from HTTP " +
+            previous.status_code +
+            " to HTTP " +
+            page.statusCode +
+            ".",
+          importance: page.statusCode >= 500 ? "high" : "medium",
+          affectedScope: {
+            url: page.requestedUrl,
+            previous_status: previous.status_code,
+            current_status: page.statusCode,
+          },
+          recommendedAction:
+            "Investigate the deployment, redirect or routing change that caused this URL to stop returning a successful response.",
+          metadata: {
+            rule: "delta_status_regression",
+            previous_status: previous.status_code,
+            current_status: page.statusCode,
+          },
+        });
+      }
+    }
+
+    if ((previous.title || null) !== (page.title || null)) {
+      changes.push("title");
+      titleChanges.push({
+        url: page.requestedUrl,
+        from: previous.title,
+        to: page.title,
+      });
+
+      if (previous.title && !page.title) {
+        regressionFindings.push({
+          fingerprint: "crawl:regression-title-missing:" + findingKey(page.requestedUrl),
+          findingType: "regression",
+          title: "Title disappeared since previous crawl",
+          summary:
+            page.requestedUrl +
+            " had a title in the previous crawl but no title is present now.",
+          importance: "medium",
+          affectedScope: {
+            url: page.requestedUrl,
+            previous_title: previous.title,
+          },
+          recommendedAction:
+            "Check the page template or recent deployment that removed the title element.",
+          metadata: { rule: "delta_title_removed" },
+        });
+      }
+    }
+
+    if ((previous.canonical || null) !== (page.canonical || null)) {
+      changes.push("canonical");
+      canonicalChanges.push({
+        url: page.requestedUrl,
+        from: previous.canonical,
+        to: page.canonical,
+      });
+    }
+
+    if (previous.indexable !== page.indexable) {
+      changes.push("indexability");
+      indexabilityChanges.push({
+        url: page.requestedUrl,
+        from: previous.indexable,
+        to: page.indexable,
+        from_reason: previous.indexability_reason,
+        to_reason: page.indexabilityReason,
+      });
+
+      if (previous.indexable === true && page.indexable === false) {
+        regressionFindings.push({
+          fingerprint: "crawl:regression-indexability:" + findingKey(page.requestedUrl),
+          findingType: "regression",
+          title: "Indexability regression",
+          summary:
+            page.requestedUrl +
+            " changed from indexable candidate to non-indexable (" +
+            String(page.indexabilityReason || "unknown reason") +
+            ").",
+          importance: "high",
+          affectedScope: {
+            url: page.requestedUrl,
+            previous_indexable: true,
+            current_indexable: false,
+            previous_reason: previous.indexability_reason,
+            current_reason: page.indexabilityReason,
+          },
+          recommendedAction:
+            "Validate whether the indexability change was intentional. Review status, robots directives and canonical behavior before deployment is considered healthy.",
+          metadata: {
+            rule: "delta_indexability_regression",
+            previous_reason: previous.indexability_reason,
+            current_reason: page.indexabilityReason,
+          },
+        });
+      }
+    }
+
+    if (changes.length) changed.add(key);
+  }
+
+  return {
+    changed,
+    regressionFindings,
+    summary: {
+      compared_urls: states.length - newUrls.length,
+      changed_urls: changed.size,
+      new_urls: newUrls.length,
+      content_changes: contentChanges.length,
+      status_changes: statusChanges.length,
+      title_changes: titleChanges.length,
+      canonical_changes: canonicalChanges.length,
+      indexability_changes: indexabilityChanges.length,
+      samples: {
+        new_urls: newUrls.slice(0, 25),
+        content_changes: contentChanges.slice(0, 25),
+        status_changes: statusChanges.slice(0, 25),
+        title_changes: titleChanges.slice(0, 25),
+        canonical_changes: canonicalChanges.slice(0, 25),
+        indexability_changes: indexabilityChanges.slice(0, 25),
+      },
+    },
+  };
+}
+
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -777,6 +979,39 @@ export async function runProjectCrawl(input: {
       discovery.origin,
     );
 
+    let baselineRunId: string | null = null;
+    let previousPages: PreviousPageSnapshot[] = [];
+
+    if (crawlType === "delta") {
+      const { data: previousRun } = await supabase
+        .from("crawl_runs")
+        .select("id")
+        .eq("project_id", input.projectId)
+        .eq("owner_id", input.ownerId)
+        .in("status", ["succeeded", "partial"])
+        .neq("id", run.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (previousRun?.id) {
+        baselineRunId = previousRun.id;
+        const { data: previousSnapshots, error: previousError } = await supabase
+          .from("crawl_pages")
+          .select("requested_url,url,final_url,status_code,title,canonical,indexable,indexability_reason,content_hash")
+          .eq("crawl_run_id", previousRun.id)
+          .limit(5000);
+
+        if (previousError) throw previousError;
+        previousPages = (previousSnapshots || []) as PreviousPageSnapshot[];
+      }
+    }
+
+    const delta =
+      crawlType === "delta" && baselineRunId
+        ? compareDelta(states, previousPages)
+        : null;
+
     const crawledTargetSet = new Set<string>();
     for (const state of states) {
       crawledTargetSet.add(state.requestedNormalized);
@@ -862,31 +1097,44 @@ export async function runProjectCrawl(input: {
       await insertInChunks(supabase, "crawl_links", linkRows, 750);
     }
 
+    const pageRuleStates =
+      crawlType === "delta" && delta
+        ? states.filter((state) => delta.changed.has(state.requestedNormalized))
+        : states;
+
+    const aggregateFindings =
+      crawlType === "delta" && delta
+        ? []
+        : [
+            ...groupedDuplicateFinding({
+              pages: states,
+              selector: (page) => page.title,
+              rule: "duplicate_title",
+              title: "Duplicate title across crawled pages",
+              label: "title",
+            }),
+            ...groupedDuplicateFinding({
+              pages: states,
+              selector: (page) => page.metaDescription,
+              rule: "duplicate_meta_description",
+              title: "Duplicate meta description across crawled pages",
+              label: "meta description",
+            }),
+            ...groupedDuplicateFinding({
+              pages: states,
+              selector: (page) => page.contentHash,
+              rule: "duplicate_content_hash",
+              title: "Duplicate HTML content detected",
+              label: "HTML content hash",
+            }),
+            ...brokenInternalLinkFindings(states),
+            ...redirectInternalLinkFindings(states),
+          ];
+
     const findings = [
-      ...states.flatMap(pageFindings),
-      ...groupedDuplicateFinding({
-        pages: states,
-        selector: (page) => page.title,
-        rule: "duplicate_title",
-        title: "Duplicate title across crawled pages",
-        label: "title",
-      }),
-      ...groupedDuplicateFinding({
-        pages: states,
-        selector: (page) => page.metaDescription,
-        rule: "duplicate_meta_description",
-        title: "Duplicate meta description across crawled pages",
-        label: "meta description",
-      }),
-      ...groupedDuplicateFinding({
-        pages: states,
-        selector: (page) => page.contentHash,
-        rule: "duplicate_content_hash",
-        title: "Duplicate HTML content detected",
-        label: "HTML content hash",
-      }),
-      ...brokenInternalLinkFindings(states),
-      ...redirectInternalLinkFindings(states),
+      ...(delta?.regressionFindings || []),
+      ...pageRuleStates.flatMap(pageFindings),
+      ...aggregateFindings,
     ].slice(0, 750);
 
     if (findings.length) {
@@ -895,7 +1143,7 @@ export async function runProjectCrawl(input: {
         findings.map((finding) => ({
           project_id: input.projectId,
           owner_id: input.ownerId,
-          finding_type: "issue",
+          finding_type: finding.findingType || "issue",
           title: finding.title,
           summary: finding.summary,
           why_it_matters:
@@ -971,6 +1219,22 @@ export async function runProjectCrawl(input: {
       orphan_candidates: orphanCandidates,
       max_crawl_depth: maxDepth,
       finding_count: findings.length,
+      delta:
+        crawlType === "delta"
+          ? {
+              baseline_run_id: baselineRunId,
+              ...(delta?.summary || {
+                compared_urls: 0,
+                changed_urls: states.length,
+                new_urls: states.length,
+                content_changes: 0,
+                status_changes: 0,
+                title_changes: 0,
+                canonical_changes: 0,
+                indexability_changes: 0,
+              }),
+            }
+          : null,
       avg_response_ms:
         states.filter((state) => state.page.responseMs).length
           ? Math.round(
