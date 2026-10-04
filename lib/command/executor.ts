@@ -1283,8 +1283,13 @@ export async function executeChiefActions(input: {
             last_run_at: new Date().toISOString(),
             last_data_date: scan.dataDate,
             last_status:
-              scan.gscAvailable || scan.ga4Available ? "succeeded" : "partial",
-            last_error: null,
+              scan.gscReady || scan.gscQueryPageReady || scan.ga4Ready
+                ? "succeeded"
+                : "partial",
+            last_error:
+              scan.gscReady || scan.gscQueryPageReady || scan.ga4Ready
+                ? null
+                : "Warehouse coverage is not sufficient yet; the engine will wait for more synced days.",
             consecutive_failures: 0,
             updated_at: new Date().toISOString(),
           },
