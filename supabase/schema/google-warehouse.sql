@@ -131,6 +131,9 @@ alter table public.project_bindings
 
 -- Indexes, grants and RLS policies are applied in production as part of the same rollout.
 
+create index if not exists gsc_query_page_project_owner_fk_idx
+  on public.gsc_query_page_daily(project_id,owner_id);
+
 
 create or replace function public.get_gsc_query_page_insights(
   p_project_id uuid,
