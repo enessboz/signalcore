@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/sales-discovery",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/crawl-worker",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
