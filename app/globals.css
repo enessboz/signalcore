@@ -739,3 +739,15 @@ button, input, textarea { font: inherit; }
   .technicalHealthGrid { grid-template-columns: 1fr; }
   .technicalCoverageGrid { grid-template-columns: 1fr; }
 }
+
+.technicalScheduleGrid { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(0,.95fr); gap: 14px; align-items: start; }
+.technicalScheduleForm { margin: 0; }
+.technicalScheduleList { display: grid; gap: 9px; }
+.technicalScheduleCard { border: 1px solid var(--line); border-radius: 10px; background: white; padding: 11px; }
+.technicalScheduleTop { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.technicalScheduleTop h3 { margin: 3px 0 0; font-size: 11px; }
+.technicalScheduleCard > p { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.technicalScheduleCard form { margin: 0; }
+@media (max-width: 900px) {
+  .technicalScheduleGrid { grid-template-columns: 1fr; }
+}
