@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 
 const WORKER_LABELS: Record<string, string> = {
   "data-sync": "Google Data Sync",
-  "technical-crawler": "Technical Crawler",
+  "technical-crawler": "Technical Crawl Scheduler",
+  "crawl-worker": "Distributed Crawl Worker",
+  "crawl-performance": "PageSpeed / CWV Worker",
   "rank-tracker": "Rank Tracker",
   "opportunity-engine": "Opportunity Engine",
   interventions: "Intervention Monitoring",
@@ -62,6 +64,11 @@ export default async function OperationsPage() {
     { count: failedSync },
     { count: failedJobs },
     { count: runningJobs },
+    { count: queuedCrawlUrls },
+    { count: claimedCrawlUrls },
+    { count: failedCrawlUrls },
+    { count: runningCrawlRuns },
+    { count: queuedPerformance },
   ] = await Promise.all([
     supabase
       .from("runtime_worker_runs")
@@ -88,6 +95,27 @@ export default async function OperationsPage() {
       .from("jobs")
       .select("id", { count: "exact", head: true })
       .eq("status", "running"),
+    supabase
+      .from("crawl_url_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "queued"),
+    supabase
+      .from("crawl_url_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "claimed"),
+    supabase
+      .from("crawl_url_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed"),
+    supabase
+      .from("crawl_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("execution_mode", "queue")
+      .eq("status", "running"),
+    supabase
+      .from("crawl_performance_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "queued"),
   ]);
 
   const recent = (runs || []).filter((run) => run.started_at >= dayAgo);
@@ -165,6 +193,21 @@ export default async function OperationsPage() {
           <small>
             {queuedSync || 0} queued · {runningSync || 0} running · {failedSync || 0} failed
           </small>
+        </article>
+        <article className="healthCard">
+          <span>Distributed crawl queue</span>
+          <strong>
+            {(queuedCrawlUrls || 0) + (claimedCrawlUrls || 0)}
+          </strong>
+          <small>
+            {runningCrawlRuns || 0} run(s) · {queuedCrawlUrls || 0} queued ·{" "}
+            {claimedCrawlUrls || 0} claimed · {failedCrawlUrls || 0} failed
+          </small>
+        </article>
+        <article className="healthCard">
+          <span>PageSpeed queue</span>
+          <strong>{queuedPerformance || 0}</strong>
+          <small>Selective CWV samples waiting</small>
         </article>
         <article className="healthCard">
           <span>Generic jobs</span>
