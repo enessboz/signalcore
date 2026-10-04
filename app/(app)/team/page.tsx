@@ -1,11 +1,33 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-function runtimeState(run: {
+type AgentDefinitionRow = {
+  agent_key: string;
+  name: string;
+  domain: string;
+  description: string;
+  model_class: string;
+  default_model: string | null;
   status: string;
+  reports_to: string | null;
+  team_level: number;
+  sort_order: number;
+  capabilities: unknown;
+};
+
+type AgentRunRow = {
+  id: string;
+  agent_key: string;
+  project_id: string | null;
+  status: string;
+  user_request: string;
+  model: string | null;
+  error: string | null;
   created_at: string;
-  error?: string | null;
-} | undefined) {
+  completed_at: string | null;
+};
+
+function runtimeState(run: AgentRunRow | undefined) {
   if (!run) return { label: "Idle", className: "teamIdle" };
   if (run.status === "running" || run.status === "queued") {
     return { label: "Working", className: "teamWorking" };
@@ -58,9 +80,12 @@ export default async function TeamPage() {
       .limit(16),
   ]);
 
-  const latestRunByAgent = new Map<string, (typeof runs extends Array<infer T> | null ? T : never)>();
-  for (const run of runs || []) {
-    if (!latestRunByAgent.has(run.agent_key)) latestRunByAgent.set(run.agent_key, run as never);
+  const typedAgents = (agents || []) as AgentDefinitionRow[];
+  const typedRuns = (runs || []) as AgentRunRow[];
+
+  const latestRunByAgent = new Map<string, AgentRunRow>();
+  for (const run of typedRuns) {
+    if (!latestRunByAgent.has(run.agent_key)) latestRunByAgent.set(run.agent_key, run);
   }
 
   const schedulesByAgent = new Map<string, number>();
@@ -71,15 +96,15 @@ export default async function TeamPage() {
     );
   }
 
-  const chief = (agents || []).find((agent) => agent.agent_key === "chief_operator");
-  const router = (agents || []).find((agent) => agent.agent_key === "router_orchestrator");
-  const specialists = (agents || []).filter((agent) => agent.team_level === 2);
+  const chief = typedAgents.find((agent) => agent.agent_key === "chief_operator");
+  const router = typedAgents.find((agent) => agent.agent_key === "router_orchestrator");
+  const specialists = typedAgents.filter((agent) => agent.team_level === 2);
 
   function AgentCard({
     agent,
     featured = false,
   }: {
-    agent: NonNullable<typeof chief>;
+    agent: AgentDefinitionRow;
     featured?: boolean;
   }) {
     const latest = latestRunByAgent.get(agent.agent_key);
@@ -178,7 +203,7 @@ export default async function TeamPage() {
             {specialists.map((agent) => (
               <div className="orgSpecialistNode" key={agent.agent_key}>
                 <div className="orgNodeStem" />
-                <AgentCard agent={agent as NonNullable<typeof chief>} />
+                <AgentCard agent={agent} />
               </div>
             ))}
           </div>
@@ -192,8 +217,8 @@ export default async function TeamPage() {
           </div>
           {(runs || []).length ? (
             <div className="teamActivityList">
-              {(runs || []).slice(0, 18).map((run) => {
-                const agent = (agents || []).find((item) => item.agent_key === run.agent_key);
+              {typedRuns.slice(0, 18).map((run) => {
+                const agent = typedAgents.find((item) => item.agent_key === run.agent_key);
                 const state = runtimeState(run);
                 return (
                   <div className="teamActivityRow" key={run.id}>
