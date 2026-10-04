@@ -1085,6 +1085,7 @@ async function crawlWithDiscovery(input: {
   sitemapUrls: string[];
   maxUrls: number;
   deadlineAt?: number;
+  jsRenderMode?: "off" | "auto" | "always";
 }) {
   const home = new URL("/", input.origin).toString();
   const priorityQueue: string[] = [home];
@@ -1132,7 +1133,9 @@ async function crawlWithDiscovery(input: {
     }
 
     const crawled = await mapLimit(batch, 5, (url) =>
-      crawlPage(url, input.origin),
+      crawlPage(url, input.origin, {
+        jsRenderMode: input.jsRenderMode || "off",
+      }),
     );
     pages.push(...crawled);
 
@@ -1265,12 +1268,14 @@ export async function runProjectCrawl(input: {
   crawlType?: CrawlType;
   maxRuntimeMs?: number;
   sitemapOffset?: number;
+  jsRenderMode?: "off" | "auto" | "always";
   client?: SupabaseClient;
 }) {
   const supabase = input.client || (await createClient());
   const maxUrls = Math.min(Math.max(input.maxUrls || 100, 1), 500);
   const crawlType = input.crawlType || "http";
   const sitemapOffset = Math.max(Number(input.sitemapOffset || 0), 0);
+  const jsRenderMode = input.jsRenderMode || "off";
   const startedAtMs = Date.now();
   const maxRuntimeMs = Math.min(
     Math.max(input.maxRuntimeMs || 210_000, 30_000),
@@ -1304,6 +1309,11 @@ export async function runProjectCrawl(input: {
       status: "running",
       seed_url: seedUrl,
       max_urls: maxUrls,
+      js_render_mode: jsRenderMode,
+      crawl_config: {
+        execution_mode: "inline",
+        js_render_mode: jsRenderMode,
+      },
       started_at: new Date().toISOString(),
     })
     .select("id")
@@ -1326,6 +1336,7 @@ export async function runProjectCrawl(input: {
       sitemapUrls: discovery.sitemapUrls,
       maxUrls,
       deadlineAt: crawlDeadlineAt,
+      jsRenderMode,
     });
     const pages = crawlResult.pages;
 
@@ -1558,7 +1569,7 @@ export async function runProjectCrawl(input: {
     );
 
     const summary = {
-      crawler_version: "raw-http-v2",
+      crawler_version: "raw-http-v3",
       runtime_budget_ms: maxRuntimeMs,
       runtime_limited: crawlResult.runtimeLimited,
       elapsed_ms: Date.now() - startedAtMs,
