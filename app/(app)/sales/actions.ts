@@ -51,6 +51,8 @@ export async function createSalesCampaign(formData: FormData) {
     1000,
   );
   const maxRunCost = Math.max(Number(text(formData, "maxRunCost") || "0.25"), 0);
+  const monthlyBudget = Math.max(Number(text(formData, "monthlyBudget") || "5"), 0);
+  const monthlyBudgetHardStop = formData.get("monthlyBudgetHardStop") === "on";
 
   if (!name || !queries.length || !Number.isFinite(locationCode)) {
     redirect("/sales?error=Campaign%20name,%20queries%20and%20location%20code%20are%20required");
@@ -70,6 +72,8 @@ export async function createSalesCampaign(formData: FormData) {
     min_score: minScore,
     max_candidates: maxCandidates,
     max_run_cost_usd: maxRunCost,
+    monthly_budget_usd: monthlyBudget,
+    monthly_budget_hard_stop: monthlyBudgetHardStop,
     status: "draft",
   });
 
@@ -163,6 +167,8 @@ export async function saveSalesCampaignAutomation(
     Math.max(Number(text(formData, "autoQualifyCount") || "5"), 0),
     10,
   );
+  const monthlyBudget = Math.max(Number(text(formData, "monthlyBudget") || "5"), 0);
+  const monthlyBudgetHardStop = formData.get("monthlyBudgetHardStop") === "on";
   const daysOfWeek = text(formData, "daysOfWeek")
     .split(",")
     .map((item) => Number(item.trim()))
@@ -197,6 +203,8 @@ export async function saveSalesCampaignAutomation(
       schedule_config: scheduleConfig,
       timezone,
       auto_qualify_count: autoQualifyCount,
+      monthly_budget_usd: monthlyBudget,
+      monthly_budget_hard_stop: monthlyBudgetHardStop,
       last_auto_status: enabled ? "idle" : "paused",
       last_auto_error: null,
       status: enabled ? "active" : undefined,
