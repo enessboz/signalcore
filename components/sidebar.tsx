@@ -4,6 +4,7 @@ const sections = [
   ["Overview", "/"],
   ["Command", "/command"],
   ["Team Room", "/team"],
+  ["Global Brain", "/brain"],
   ["Projects", "/projects"],
   ["Agents", "/agents"],
   ["Opportunities", "/opportunities"],
