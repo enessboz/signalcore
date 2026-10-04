@@ -87,13 +87,42 @@ export default async function SearchConsolePage({
     bindingError = error instanceof Error ? error.message : "GSC property is unavailable.";
   }
 
-  const { data: savedViews } = await supabase
-    .from("saved_analytics_views")
-    .select("id,name,config,created_at")
-    .eq("project_id", id)
-    .eq("data_source", "gsc")
-    .order("updated_at", { ascending: false })
-    .limit(20);
+  const [
+    { data: savedViews },
+    { data: warehouseStates },
+    { data: queryPageInsightData },
+  ] = await Promise.all([
+    supabase
+      .from("saved_analytics_views")
+      .select("id,name,config,created_at")
+      .eq("project_id", id)
+      .eq("data_source", "gsc")
+      .order("updated_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("google_sync_states")
+      .select("dataset,status,last_complete_date,last_success_at,rows_total,last_error")
+      .eq("project_id", id)
+      .eq("source", "gsc"),
+    supabase.rpc("get_gsc_query_page_insights", {
+      p_project_id: id,
+      p_days: 28,
+      p_min_impressions: 100,
+      p_limit: 50,
+    }),
+  ]);
+
+  const warehouseStateMap = new Map(
+    (warehouseStates || []).map((state) => [state.dataset, state]),
+  );
+  const queryPageInsights =
+    (queryPageInsightData || {}) as Record<string, unknown>;
+  const ownershipSplits = Array.isArray(queryPageInsights.ownership_splits)
+    ? (queryPageInsights.ownership_splits as Array<Record<string, unknown>>)
+    : [];
+  const urlSwitches = Array.isArray(queryPageInsights.url_switches)
+    ? (queryPageInsights.url_switches as Array<Record<string, unknown>>)
+    : [];
 
   const presetKey = PRESETS[scalar(query.view, "queries")]
     ? scalar(query.view, "queries")
@@ -221,6 +250,27 @@ export default async function SearchConsolePage({
       {scalar(query.error) ? <p className="formMessage formError pageMessage">{scalar(query.error)}</p> : null}
       {scalar(query.message) ? <p className="formMessage formSuccess pageMessage">{scalar(query.message)}</p> : null}
       {queryError ? <p className="formMessage formError pageMessage">{queryError}</p> : null}
+
+      <section className="healthGrid">
+        {[
+          ["page_daily", "Page warehouse"],
+          ["query_daily", "Query warehouse"],
+          ["query_page_daily", "Query × Page warehouse"],
+        ].map(([dataset, label]) => {
+          const state = warehouseStateMap.get(dataset);
+          return (
+            <article className="healthCard" key={dataset}>
+              <span>{label}</span>
+              <strong>{state?.last_complete_date || "—"}</strong>
+              <small>
+                {state
+                  ? String(state.rows_total || 0) + " rows · " + state.status
+                  : "Not synced yet"}
+              </small>
+            </article>
+          );
+        })}
+      </section>
 
       <section className="panel explorerToolbar">
         <form method="get" className="explorerForm">
@@ -399,11 +449,54 @@ export default async function SearchConsolePage({
               <span>Rising and declining queries</span>
               <span>New and lost visibility queries</span>
               <span>Declining landing pages</span>
-              <span>Multiple pages ranking for one query</span>
+              <span>Query ownership split across multiple URLs</span>
+              <span>Dominant ranking URL switches</span>
             </div>
             <form action={runGscOpportunityScan.bind(null, id)}>
               <button className="primaryButton fullButton" type="submit" disabled={!resource}>Run 28-day Opportunity Scan</button>
             </form>
+          </section>
+
+          <section className="panel">
+            <div className="panelHeader">
+              <div>
+                <h2>Query ownership evidence</h2>
+                <p>Warehouse-only signals. Review before calling anything cannibalization.</p>
+              </div>
+            </div>
+            {ownershipSplits.length || urlSwitches.length ? (
+              <div className="trendList">
+                {ownershipSplits.slice(0, 5).map((item, index) => (
+                  <div className="trendRow" key={"split-" + index}>
+                    <span>{String(item.query || "Query")}</span>
+                    <div className="trendMetrics">
+                      <strong>
+                        {String(item.page_count || 0)} URLs ·{" "}
+                        {Math.round(Number(item.top_page_share || 0) * 100)}% top owner
+                      </strong>
+                      <small>
+                        {formatNumber(Number(item.total_impressions || 0))} imp.
+                      </small>
+                    </div>
+                  </div>
+                ))}
+                {urlSwitches.slice(0, 5).map((item, index) => (
+                  <div className="trendRow" key={"switch-" + index}>
+                    <span>{String(item.query || "Query")}</span>
+                    <div className="trendMetrics">
+                      <strong>Dominant URL changed</strong>
+                      <small>
+                        {String(item.current_top_page || "—")}
+                      </small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState smallEmpty">
+                <span>No query ownership evidence yet. Query × Page warehouse data must sync first.</span>
+              </div>
+            )}
           </section>
 
           <section className="panel">
