@@ -21,6 +21,9 @@ Recommended:
 - `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` — required for Rank Tracking, live SERP research and Sales Discovery.
 - `GITHUB_TOKEN` — required only for private repository context.
 - `SERP_ESTIMATED_COST_PER_REQUEST_USD` — conservative pre-call estimate for SERP budget enforcement.
+- `PAGESPEED_API_KEY` — enables selective PageSpeed/Core Web Vitals sampling.
+- `JS_RENDER_ENDPOINT` — optional headless rendering service used only when JS mode is auto/always.
+- `JS_RENDER_TOKEN` — optional authentication for the configured JS rendering service.
 
 Never commit secret values to the repository.
 
@@ -34,10 +37,12 @@ Never commit secret values to the repository.
 6. Open `/preflight`.
 7. Do not continue until every required preflight check is green.
 
-SignalCore defines seven protected Vercel Cron routes in `vercel.json`:
+SignalCore defines nine protected Vercel Cron routes in `vercel.json`:
 
 - `/api/cron/data-sync`
 - `/api/cron/technical-crawler`
+- `/api/cron/crawl-worker`
+- `/api/cron/crawl-performance`
 - `/api/cron/rank-tracker`
 - `/api/cron/opportunity-engine`
 - `/api/cron/interventions`
@@ -128,21 +133,37 @@ Do not trust comparison-based Opportunity Engine findings while warehouse covera
 
 ## 8. Technical crawler
 
-Scheduled crawls are production-bounded:
+All new Technical Crawl runs use the resumable distributed frontier. The crawler is designed for 10K production runs and has a 100K URL safety ceiling.
 
-- safe execution deadline,
-- partial completion before function timeout,
-- sitemap rotation for broad large-site coverage,
-- delta mode for change/regression monitoring.
+Core behavior:
 
-For very large sites, do not treat one sample crawl as complete-site coverage. Use scheduled rotating samples and first-party URL inventories.
+- scheduler polls arbitrary schedules every five minutes,
+- crawl frontier worker claims URL batches atomically with `SKIP LOCKED`,
+- stale claims recover automatically,
+- robots.txt is parsed and enforced before page requests,
+- robots crawl-delay and configured minimum delay are respected,
+- transient HTTP failures use retry/backoff,
+- the worker releases remaining claims before the function deadline,
+- multiple batches are processed inside one safe worker invocation,
+- selective JS rendering is a fallback layer rather than default cost on every URL,
+- sitemap/indexability conflicts are evaluated deterministically,
+- SimHash identifies bounded near-duplicate clusters,
+- selective PageSpeed/CWV samples run in a separate queue,
+- distributed delta mode compares against the previous completed crawl,
+- Technical SEO Agent interprets crawler findings but does not perform raw detection.
 
-After the first production crawl:
+Production acceptance sequence:
 
-1. Confirm the run completes or exits as controlled partial.
-2. Confirm `runtime_limited` is understandable when present.
-3. Confirm the next sitemap offset advances.
-4. Confirm the next scheduled run rotates into a different sitemap segment.
+1. Run a 100 URL distributed crawl.
+2. Review duration, pages/minute, page/link row counts and measured DB payload in the benchmark panel.
+3. Review enough findings to establish a meaningful false-positive ratio.
+4. Run a 500 URL distributed crawl and repeat the benchmark.
+5. Confirm no robots bypass, stale claims or repeated retries.
+6. Confirm graph finalization produces plausible inlinks and crawl depth.
+7. If JS rendering is enabled, validate fallback only on pages that need it.
+8. If PageSpeed is enabled, confirm only the configured sample is queued.
+9. Run the 10K acceptance crawl.
+10. Confirm the run can stop/resume across many worker invocations while preserving one crawl_run reference.
 
 ## 9. Operations
 
