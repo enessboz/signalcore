@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { executeAgentTask } from "@/lib/agents/runtime";
-import { isScheduleDue } from "@/lib/command/schedule";
+import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
   const now = new Date();
   const due = (tasks || []).filter((task) =>
     isScheduleDue({
-      scheduleKind: task.schedule_kind,
-      scheduleConfig: task.schedule_config || {},
+      scheduleKind: task.schedule_kind as ScheduleKind,
+      scheduleConfig: (task.schedule_config || {}) as ScheduleConfig,
       timezone: task.timezone || "Europe/Istanbul",
       lastRunAt: task.last_run_at,
       now,
