@@ -3,6 +3,7 @@ import Link from "next/link";
 const sections = [
   ["Overview", "/"],
   ["Projects", "/projects"],
+  ["Agents", "/agents"],
   ["Opportunities", "/opportunities"],
   ["Issues & Regressions", "/issues"],
   ["Sales", "/sales"],
