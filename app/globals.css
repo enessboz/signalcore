@@ -583,3 +583,23 @@ button, input, textarea { font: inherit; }
 .profileCard form { margin: 0; }
 @media (max-width: 1000px) { .profileGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 640px) { .profileGrid { grid-template-columns: 1fr; } }
+
+.outputContractBar { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-bottom: 12px; }
+.outputContractBar > div { border: 1px solid var(--line); background: white; border-radius: 9px; padding: 10px; display: grid; gap: 2px; }
+.outputContractBar strong { font-size: 8px; }
+.outputContractBar span { color: var(--muted); font-size: 8px; }
+.slidePlanGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-bottom: 16px; }
+.slidePlanCard { border: 1px solid var(--line); background: white; border-radius: 11px; padding: 12px; }
+.slidePlanTop { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.slidePlanTop span { color: var(--muted); font-size: 8px; }
+.slidePlanTop strong { color: #3538cd; background: #eef4ff; padding: 3px 6px; border-radius: 999px; font-size: 7px; text-transform: uppercase; }
+.slidePlanCard h2 { margin: 10px 0 5px; font-size: 11px; }
+.slidePlanCard p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.slidePlanCard ul { margin: 8px 0 0 16px; padding: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.slideEvidence { border-top: 1px solid var(--line); margin-top: 9px; padding-top: 8px; display: grid; gap: 3px; }
+.slideEvidence strong { font-size: 7px; }
+.slideEvidence span { color: var(--muted); font-size: 7px; overflow-wrap: anywhere; }
+@media (max-width: 960px) { .slidePlanGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 620px) {
+  .slidePlanGrid, .outputContractBar { grid-template-columns: 1fr; }
+}
