@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { enqueueGoogleSync } from "@/lib/google/sync";
 import { createClient } from "@/lib/supabase/server";
+import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
 
 function textValue(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -242,6 +243,42 @@ export async function queueGoogleBackfill(
       `/projects/${projectId}?error=${encodeURIComponent(
         error instanceof Error ? error.message : "Backfill could not be queued",
       )}`,
+    );
+  }
+}
+
+
+export async function convertProjectToClient(projectId: string) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (!ownerId) redirect("/login");
+
+  try {
+    const result = await convertLeadProspectProjectToClient({
+      ownerId,
+      projectId,
+      client: supabase,
+    });
+
+    redirect(
+      "/projects/" +
+        projectId +
+        "?message=" +
+        encodeURIComponent(
+          result.changed
+            ? "Lead Prospect converted to Client workspace"
+            : "Project is already a Client workspace",
+        ),
+    );
+  } catch (error) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "?error=" +
+        encodeURIComponent(
+          error instanceof Error ? error.message : "Project conversion failed",
+        ),
     );
   }
 }
