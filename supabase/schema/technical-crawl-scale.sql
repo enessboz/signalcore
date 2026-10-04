@@ -245,3 +245,108 @@ revoke all on function public.claim_crawl_url_batch(uuid,integer,uuid) from publ
 revoke all on function public.claim_crawl_url_batch(uuid,integer,uuid) from anon;
 revoke all on function public.claim_crawl_url_batch(uuid,integer,uuid) from authenticated;
 grant execute on function public.claim_crawl_url_batch(uuid,integer,uuid) to service_role;
+
+
+create or replace function public.finalize_distributed_crawl_graph(
+  p_run_id uuid
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path to 'public'
+as $function$
+declare
+  v_changed integer := 0;
+  v_iteration integer := 0;
+  v_max_depth integer := 0;
+begin
+  update public.crawl_links l
+  set target_crawled = exists (
+    select 1
+    from public.crawl_pages p
+    where p.crawl_run_id=p_run_id
+      and (p.requested_url=l.target_url or p.final_url=l.target_url)
+  )
+  where l.crawl_run_id=p_run_id
+    and l.link_scope='internal';
+
+  with counts as (
+    select p.id,count(distinct l.source_url)::int as inlinks
+    from public.crawl_pages p
+    left join public.crawl_links l
+      on l.crawl_run_id=p_run_id
+     and l.link_scope='internal'
+     and l.target_crawled=true
+     and (l.target_url=p.requested_url or l.target_url=p.final_url)
+    where p.crawl_run_id=p_run_id
+    group by p.id
+  )
+  update public.crawl_pages p
+  set inlink_count=counts.inlinks
+  from counts
+  where p.id=counts.id;
+
+  create temporary table if not exists tmp_signalcore_crawl_depth (
+    url text primary key,
+    depth integer not null
+  ) on commit drop;
+  truncate table tmp_signalcore_crawl_depth;
+
+  insert into tmp_signalcore_crawl_depth(url,depth)
+  select distinct coalesce(p.final_url,p.requested_url,p.url),0
+  from public.crawl_pages p
+  where p.crawl_run_id=p_run_id
+    and p.crawl_depth=0
+    and coalesce(p.final_url,p.requested_url,p.url) is not null
+  on conflict do nothing;
+
+  loop
+    v_iteration := v_iteration + 1;
+    exit when v_iteration > 100;
+
+    insert into tmp_signalcore_crawl_depth(url,depth)
+    select l.target_url,min(d.depth+1)
+    from tmp_signalcore_crawl_depth d
+    join public.crawl_links l
+      on l.crawl_run_id=p_run_id
+     and l.link_scope='internal'
+     and l.target_crawled=true
+     and l.source_url=d.url
+    left join tmp_signalcore_crawl_depth existing
+      on existing.url=l.target_url
+    where existing.url is null
+    group by l.target_url
+    on conflict do nothing;
+
+    get diagnostics v_changed = row_count;
+    exit when v_changed=0;
+  end loop;
+
+  update public.crawl_pages p
+  set crawl_depth=d.depth
+  from tmp_signalcore_crawl_depth d
+  where p.crawl_run_id=p_run_id
+    and (p.requested_url=d.url or p.final_url=d.url);
+
+  update public.crawl_pages p
+  set orphan_candidate =
+    p.sitemap_present
+    and coalesce(p.inlink_count,0)=0
+    and coalesce(p.crawl_depth,999999)>0
+  where p.crawl_run_id=p_run_id;
+
+  select coalesce(max(depth),0)
+  into v_max_depth
+  from tmp_signalcore_crawl_depth;
+
+  return jsonb_build_object(
+    'max_depth',v_max_depth,
+    'iterations',v_iteration
+  );
+end;
+$function$;
+
+revoke all on function public.finalize_distributed_crawl_graph(uuid) from public;
+revoke all on function public.finalize_distributed_crawl_graph(uuid) from anon;
+revoke all on function public.finalize_distributed_crawl_graph(uuid) from authenticated;
+grant execute on function public.finalize_distributed_crawl_graph(uuid) to service_role;
