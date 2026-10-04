@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
@@ -30,6 +31,20 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:sales-discovery",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another sales discovery invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
   const now = new Date();
 
   const { data: campaigns, error } = await supabase
