@@ -107,5 +107,8 @@ create table if not exists public.opportunity_scan_settings (
     references public.projects(id,owner_id) on delete cascade
 );
 
+create index if not exists tracked_keywords_project_owner_fk_idx
+  on public.tracked_keywords(project_id,owner_id);
+
 -- Production rollout also defines owner-scoped RLS, grants, indexes,
 -- get_gsc_tracking_candidates(...) and get_gsc_opportunity_dataset(...).
