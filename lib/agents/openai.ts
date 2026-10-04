@@ -252,6 +252,7 @@ export function estimateModelCost(
 ) {
   const rates: Record<string, { input: number; output: number }> = {
     "gpt-6-luna": { input: 0.1, output: 0.5 },
+    "gpt-6.1-sol": { input: 2, output: 10 },
     "gpt-6-sol": { input: 2, output: 10 },
   };
   const rate = rates[model];
