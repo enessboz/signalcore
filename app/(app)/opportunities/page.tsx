@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { setFindingStatus } from "./actions";
+import {
+  runWarehouseOpportunityScan,
+  saveOpportunityAutomation,
+  setFindingStatus,
+} from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -22,26 +26,47 @@ export default async function OpportunitiesPage({
 
   const projectFilter = scalar(query.project);
   const importanceFilter = scalar(query.importance);
+  const typeFilter = scalar(query.type);
   const statusFilter = scalar(query.status, "open");
 
-  const { data: projects } = await supabase
-    .from("projects")
-    .select("id,name,domain")
-    .order("name");
+  const [{ data: projects }, { data: automationSettings }] = await Promise.all([
+    supabase
+      .from("projects")
+      .select("id,name,domain")
+      .eq("status", "active")
+      .order("name"),
+    supabase
+      .from("opportunity_scan_settings")
+      .select("project_id,enabled,scan_gsc,scan_ga4,scan_rank,cadence,last_run_at,last_data_date,last_status,last_error,consecutive_failures")
+      .order("updated_at", { ascending: false }),
+  ]);
 
   let findingsQuery = supabase
     .from("findings")
-    .select("id,project_id,title,summary,why_it_matters,importance,confidence,status,affected_scope,recommended_action,metadata,last_seen_at,updated_at")
-    .in("finding_type", ["opportunity", "strategy_discovery"])
+    .select("id,project_id,finding_type,title,summary,why_it_matters,importance,confidence,status,affected_scope,recommended_action,metadata,last_seen_at,updated_at")
+    .in("finding_type", [
+      "opportunity",
+      "strategy_discovery",
+      "regression",
+      "issue",
+      "observation",
+    ])
     .order("updated_at", { ascending: false })
     .limit(300);
 
   if (projectFilter) findingsQuery = findingsQuery.eq("project_id", projectFilter);
   if (importanceFilter) findingsQuery = findingsQuery.eq("importance", importanceFilter);
+  if (typeFilter) findingsQuery = findingsQuery.eq("finding_type", typeFilter);
   if (statusFilter !== "all") findingsQuery = findingsQuery.eq("status", statusFilter);
 
   const { data: findings, error } = await findingsQuery;
   const projectMap = new Map((projects || []).map((project) => [project.id, project]));
+  const settingsMap = new Map(
+    (automationSettings || []).map((item) => [item.project_id, item]),
+  );
+  const selectedAutomation = projectFilter
+    ? settingsMap.get(projectFilter) || null
+    : null;
 
   const ordered = [...(findings || [])].sort((a, b) => {
     const importanceDiff = importanceRank(b.importance) - importanceRank(a.importance);
@@ -52,6 +77,7 @@ export default async function OpportunitiesPage({
   const returnParams = new URLSearchParams();
   if (projectFilter) returnParams.set("project", projectFilter);
   if (importanceFilter) returnParams.set("importance", importanceFilter);
+  if (typeFilter) returnParams.set("type", typeFilter);
   if (statusFilter) returnParams.set("status", statusFilter);
   const returnTo = `/opportunities${returnParams.toString() ? `?${returnParams.toString()}` : ""}`;
 
@@ -62,7 +88,8 @@ export default async function OpportunitiesPage({
           <p className="eyebrow">Intelligence inbox</p>
           <h1>Opportunities</h1>
           <p className="muted">
-            Deterministic candidates first. SEO Lead reasoning will be layered on top later.
+            Deterministic SEO intelligence from GSC, GA4, rank history and technical evidence.
+            Findings explain why they matter before any action is taken.
           </p>
         </div>
       </header>
@@ -70,6 +97,114 @@ export default async function OpportunitiesPage({
       {scalar(query.error) ? <p className="formMessage formError pageMessage">{scalar(query.error)}</p> : null}
       {scalar(query.message) ? <p className="formMessage formSuccess pageMessage">{scalar(query.message)}</p> : null}
       {error ? <p className="formMessage formError pageMessage">{error.message}</p> : null}
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Automatic Opportunity Engine</h2>
+            <p>
+              Warehouse-first detection. No model is required to collect or compare
+              GSC/GA4/rank evidence.
+            </p>
+          </div>
+          {projectFilter ? (
+            <form action={runWarehouseOpportunityScan.bind(null, projectFilter)}>
+              <button className="primaryButton" type="submit">
+                Run selected project now
+              </button>
+            </form>
+          ) : null}
+        </div>
+
+        <form className="opportunityAutomationForm" action={saveOpportunityAutomation}>
+          <label>
+            Project
+            <select name="projectId" required defaultValue={projectFilter}>
+              <option value="" disabled>Select project</option>
+              {(projects || []).map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="checkboxLabel">
+            <input
+              name="enabled"
+              type="checkbox"
+              defaultChecked={Boolean(selectedAutomation?.enabled)}
+            />
+            Enable automation
+          </label>
+
+          <label className="checkboxLabel">
+            <input
+              name="scanGsc"
+              type="checkbox"
+              defaultChecked={selectedAutomation?.scan_gsc !== false}
+            />
+            GSC warehouse
+          </label>
+
+          <label className="checkboxLabel">
+            <input
+              name="scanGa4"
+              type="checkbox"
+              defaultChecked={selectedAutomation?.scan_ga4 !== false}
+            />
+            GA4 warehouse
+          </label>
+
+          <label className="checkboxLabel">
+            <input
+              name="scanRank"
+              type="checkbox"
+              defaultChecked={selectedAutomation?.scan_rank !== false}
+            />
+            Rank cross-check
+          </label>
+
+          <label>
+            Cadence
+            <select
+              name="cadence"
+              defaultValue={selectedAutomation?.cadence || "daily"}
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </label>
+
+          <button className="secondaryButton" type="submit">
+            Save automation
+          </button>
+        </form>
+
+        {projectFilter ? (
+          <div className="opportunityAutomationState">
+            <span>
+              State: <strong>{selectedAutomation?.last_status || "not configured"}</strong>
+            </span>
+            <span>
+              Last run:{" "}
+              <strong>
+                {selectedAutomation?.last_run_at
+                  ? new Date(selectedAutomation.last_run_at).toLocaleString("en-GB")
+                  : "never"}
+              </strong>
+            </span>
+            <span>
+              Latest data: <strong>{selectedAutomation?.last_data_date || "—"}</strong>
+            </span>
+            {selectedAutomation?.last_error ? (
+              <span className="formError">{selectedAutomation.last_error}</span>
+            ) : null}
+          </div>
+        ) : (
+          <p className="muted">
+            Select a project in the filters below to inspect its current automation state.
+          </p>
+        )}
+      </section>
 
       <section className="panel filterPanel">
         <form method="get" className="filterForm">
@@ -90,6 +225,18 @@ export default async function OpportunitiesPage({
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low</option>
+            </select>
+          </label>
+
+          <label>
+            Type
+            <select name="type" defaultValue={typeFilter}>
+              <option value="">All intelligence</option>
+              <option value="opportunity">Opportunity</option>
+              <option value="strategy_discovery">Strategy discovery</option>
+              <option value="regression">Regression</option>
+              <option value="issue">Issue</option>
+              <option value="observation">Observation</option>
             </select>
           </label>
 
@@ -129,6 +276,7 @@ export default async function OpportunitiesPage({
                 <div className="opportunityBadges">
                   <span className={`importance importance-${finding.importance}`}>{finding.importance}</span>
                   <span className="confidence">{finding.confidence} confidence</span>
+                  <span className="sourceBadge">{finding.finding_type.replaceAll("_", " ")}</span>
                   <span className="sourceBadge">{source}</span>
                   {rule ? <span className="sourceBadge">{rule.replaceAll("_", " ")}</span> : null}
                 </div>
@@ -142,8 +290,19 @@ export default async function OpportunitiesPage({
                   <p>{finding.summary}</p>
                 </div>
                 {project ? (
-                  <Link href={`/projects/${project.id}/search-console`} className="ghostButton">
-                    Open GSC
+                  <Link
+                    href={
+                      source === "ga4_warehouse"
+                        ? "/projects/" + project.id + "/analytics"
+                        : source === "rank_tracker" || source === "cross_source"
+                          ? "/projects/" + project.id + "/rank-tracker"
+                          : source === "http_crawl"
+                            ? "/projects/" + project.id + "/technical"
+                            : "/projects/" + project.id + "/search-console"
+                    }
+                    className="ghostButton"
+                  >
+                    Open evidence
                   </Link>
                 ) : null}
               </div>
@@ -189,7 +348,7 @@ export default async function OpportunitiesPage({
         }) : (
           <section className="panel emptyState">
             <strong>No matching opportunities</strong>
-            <span>Run a GSC Opportunity Scan from a project’s Search Console workspace.</span>
+            <span>Enable the Automatic Opportunity Engine or run a project scan manually.</span>
           </section>
         )}
       </section>
