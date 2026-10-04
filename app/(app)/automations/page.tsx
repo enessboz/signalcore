@@ -40,6 +40,7 @@ export default async function AutomationsPage({
     { data: syncQueue },
     { data: salesCampaigns },
     { data: salesRuns },
+    { data: technicalSchedules },
   ] = await Promise.all([
     supabase.from("projects").select("id,name,domain").order("name"),
     supabase
@@ -87,6 +88,12 @@ export default async function AutomationsPage({
       .select("id,campaign_id,status,queries_completed,queries_requested,candidates_seen,leads_created,actual_cost,started_at,completed_at,error")
       .order("started_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("technical_crawl_schedules")
+      .select("id,project_id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count")
+      .neq("status", "cancelled")
+      .order("updated_at", { ascending: false })
+      .limit(50),
   ]);
 
   const projectMap = new Map((projects || []).map((project) => [project.id, project]));
@@ -106,6 +113,9 @@ export default async function AutomationsPage({
     workerReady && process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
   );
   const automatedSalesCampaigns = salesCampaigns?.length || 0;
+  const activeTechnicalSchedules = (technicalSchedules || []).filter((item) =>
+    ["active", "running"].includes(item.status),
+  ).length;
 
   return (
     <div className="page">
@@ -148,6 +158,11 @@ export default async function AutomationsPage({
           <span>Sales discovery</span>
           <strong>{automatedSalesCampaigns}</strong>
           <small>{salesWorkerReady ? "Worker ready" : "Worker paused / provider missing"}</small>
+        </article>
+        <article className="healthCard">
+          <span>Technical crawler</span>
+          <strong>{activeTechnicalSchedules}</strong>
+          <small>{workerReady ? "Deterministic worker ready" : "Worker paused"}</small>
         </article>
         <article className="healthCard">
           <span>Running / queued jobs</span>
@@ -240,6 +255,68 @@ export default async function AutomationsPage({
           <div className="emptyState smallEmpty">
             <strong>No scheduled agent tasks yet</strong>
             <span>Ask Chief Operator to create a one-time, daily, weekly or monthly task.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Technical crawl automation</h2>
+            <p>Deterministic site crawling runs independently from AI models.</p>
+          </div>
+        </div>
+
+        {(technicalSchedules || []).length ? (
+          <div className="automationTaskList">
+            {(technicalSchedules || []).map((schedule) => {
+              const project = projectMap.get(schedule.project_id);
+              return (
+                <article className="automationTaskCard" key={schedule.id}>
+                  <div className="automationTaskTop">
+                    <div>
+                      <p className="eyebrow">
+                        {project?.name || "Project"} · {schedule.crawl_type === "delta" ? "delta monitoring" : "full http crawl"}
+                      </p>
+                      <h3>{schedule.name}</h3>
+                    </div>
+                    <span className={"jobStatus job-" + schedule.status}>
+                      {schedule.status}
+                    </span>
+                  </div>
+                  <p>
+                    {scheduleDescription(
+                      schedule.schedule_kind as ScheduleKind,
+                      (schedule.schedule_config || {}) as ScheduleConfig,
+                      schedule.timezone || "Europe/Istanbul",
+                    )}
+                  </p>
+                  <div className="automationTaskMeta">
+                    <span>{schedule.max_urls} URL limit</span>
+                    <span>Last run: {formatDate(schedule.last_run_at)}</span>
+                    <span>State: {schedule.last_status}</span>
+                    <span>Failures: {schedule.failure_count || 0}</span>
+                  </div>
+                  {schedule.last_error ? (
+                    <p className="formMessage formError">{schedule.last_error}</p>
+                  ) : null}
+                  {project ? (
+                    <div className="buttonRow">
+                      <Link
+                        className="ghostButton"
+                        href={"/projects/" + project.id + "/technical"}
+                      >
+                        Open Technical Audit
+                      </Link>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="emptyState smallEmpty">
+            <span>No technical crawl schedules configured.</span>
           </div>
         )}
       </section>
@@ -357,6 +434,7 @@ export default async function AutomationsPage({
               <div><span>Agent scheduler</span><strong>{agentReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Data sync worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Sales discovery worker</span><strong>{salesWorkerReady ? "ready to activate" : "paused"}</strong></div>
+              <div><span>Technical crawl worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Failed manual jobs</span><strong>{failedJobs}</strong></div>
             </div>
             <div className="buttonRow">
