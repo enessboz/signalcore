@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { scheduleDescription } from "@/lib/command/schedule";
+import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { sendChiefCommand } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -119,8 +119,8 @@ export default async function CommandPage({
                       <strong>{schedule.title}</strong>
                       <span>
                         {scheduleDescription(
-                          schedule.schedule_kind,
-                          (schedule.schedule_config || {}) as Record<string, unknown>,
+                          schedule.schedule_kind as ScheduleKind,
+                          (schedule.schedule_config || {}) as ScheduleConfig,
                           schedule.timezone,
                         )}
                       </span>
