@@ -52,6 +52,9 @@ export type CrawledPage = {
   structuredDataCount: number;
   invalidStructuredDataCount: number;
   contentHash: string | null;
+  contentSimhash: string | null;
+  rendered: boolean;
+  renderReason: string | null;
   indexable: boolean | null;
   indexabilityReason: string | null;
   fetchError: string | null;
@@ -111,12 +114,32 @@ export async function assertPublicUrl(raw: string) {
   return url;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMs(response: Response | null, attempt: number) {
+  const retryAfter = response?.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, 15_000);
+    }
+    const date = new Date(retryAfter);
+    if (!Number.isNaN(date.getTime())) {
+      return Math.min(Math.max(date.getTime() - Date.now(), 0), 15_000);
+    }
+  }
+  return Math.min(500 * 2 ** attempt, 8_000);
+}
+
 async function safeFetch(
   raw: string,
   options: {
     maxBytes?: number;
     timeoutMs?: number;
     accept?: string;
+    retries?: number;
   } = {},
 ) {
   let url = await assertPublicUrl(raw);
@@ -124,22 +147,50 @@ async function safeFetch(
   const redirectChain: RedirectHop[] = [];
 
   for (let redirect = 0; redirect < 6; redirect += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), options.timeoutMs || 12000);
+    let response: Response | null = null;
+    let lastError: unknown = null;
+    const retries = Math.max(0, Math.min(options.retries ?? 2, 4));
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          "User-Agent": "SignalCoreBot/0.2 (+SEO audit; controlled project crawl)",
-          Accept: options.accept || "text/html,application/xhtml+xml",
-        },
-        redirect: "manual",
-        cache: "no-store",
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(),
+        options.timeoutMs || 12000,
+      );
+
+      try {
+        response = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "SignalCoreBot/0.3 (+SEO audit; controlled project crawl)",
+            Accept: options.accept || "text/html,application/xhtml+xml",
+          },
+          redirect: "manual",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        lastError = null;
+      } catch (error) {
+        lastError = error;
+        response = null;
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const retryableStatus =
+        response &&
+        [408, 425, 429, 500, 502, 503, 504].includes(response.status);
+      const shouldRetry =
+        attempt < retries && (Boolean(lastError) || Boolean(retryableStatus));
+
+      if (!shouldRetry) break;
+      await sleep(retryDelayMs(response, attempt));
+    }
+
+    if (!response) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error("HTTP fetch failed.");
     }
 
     if (response.status >= 300 && response.status < 400) {
@@ -478,6 +529,9 @@ function emptyPage(rawUrl: string, error: string): CrawledPage {
     structuredDataCount: 0,
     invalidStructuredDataCount: 0,
     contentHash: null,
+    contentSimhash: null,
+    rendered: false,
+    renderReason: null,
     indexable: false,
     indexabilityReason: "fetch_error",
     fetchError: error,
@@ -485,17 +539,219 @@ function emptyPage(rawUrl: string, error: string): CrawledPage {
   };
 }
 
-export async function crawlPage(rawUrl: string, expectedOrigin: string): Promise<CrawledPage> {
+function visibleText(html: string) {
+  return cleanText(
+    html
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " "),
+  );
+}
+
+function simhash64(text: string) {
+  const tokens = text
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]{2,}/gu)
+    ?.slice(0, 20_000) || [];
+  if (!tokens.length) return null;
+
+  const vector = new Array<number>(64).fill(0);
+  for (const token of tokens) {
+    const digest = createHash("sha256").update(token).digest();
+    for (let bit = 0; bit < 64; bit += 1) {
+      const byte = digest[Math.floor(bit / 8)]!;
+      const value = (byte >> (7 - (bit % 8))) & 1;
+      vector[bit] += value ? 1 : -1;
+    }
+  }
+
+  let hash = 0n;
+  for (let bit = 0; bit < 64; bit += 1) {
+    if (vector[bit]! >= 0) {
+      hash |= 1n << BigInt(63 - bit);
+    }
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+async function renderWithRemoteService(url: string) {
+  const endpoint = process.env.JS_RENDER_ENDPOINT;
+  if (!endpoint) {
+    throw new Error("JS_RENDER_ENDPOINT is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25_000);
   try {
-    const result = await safeFetch(rawUrl);
-    const finalUrl = result.url;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.JS_RENDER_TOKEN
+          ? { Authorization: "Bearer " + process.env.JS_RENDER_TOKEN }
+          : {}),
+      },
+      body: JSON.stringify({
+        url,
+        wait_until: "networkidle",
+        timeout_ms: 20_000,
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        "JS renderer returned HTTP " + response.status + ".",
+      );
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = (await response.json()) as {
+        html?: string;
+        final_url?: string;
+      };
+      if (!body.html) throw new Error("JS renderer returned no HTML.");
+      return {
+        html: body.html.slice(0, 3_000_000),
+        finalUrl: body.final_url || url,
+      };
+    }
+
+    return {
+      html: (await response.text()).slice(0, 3_000_000),
+      finalUrl: url,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function shouldAutoRender(html: string, page: CrawledPage) {
+  const scriptCount = (html.match(/<script\b/gi) || []).length;
+  if (page.statusCode !== 200) return false;
+  if (!page.contentType?.toLowerCase().includes("text/html")) return false;
+  return (
+    scriptCount >= 5 &&
+    (page.wordCount < 80 ||
+      page.internalLinkCount === 0 ||
+      (!page.title && page.h1s.length === 0))
+  );
+}
+
+function analyzeHtmlPage(input: {
+  rawUrl: string;
+  finalUrl: URL;
+  result: {
+    redirectChain: RedirectHop[];
+    response: Response;
+    elapsed: number;
+    bytes: number;
+  };
+  html: string;
+  xRobotsTag: string | null;
+  rendered: boolean;
+  renderReason: string | null;
+}): CrawledPage {
+  const title = tagContent(input.html, "title", 1)[0] || null;
+  const h1s = tagContent(input.html, "h1", 50);
+  const h2s = tagContent(input.html, "h2", 100);
+  const h3s = tagContent(input.html, "h3", 150);
+  const h4s = tagContent(input.html, "h4", 150);
+  const h5s = tagContent(input.html, "h5", 150);
+  const h6s = tagContent(input.html, "h6", 150);
+  const links = extractLinks(input.html, input.finalUrl);
+  const images = imageStats(input.html);
+  const structured = structuredDataStats(input.html);
+  const robotsMeta = findMeta(input.html, "robots");
+  const canonical = findCanonical(input.html, input.finalUrl);
+  const hreflangs = findHreflangs(input.html, input.finalUrl);
+  const contentType = input.result.response.headers.get("content-type");
+  const indexState = indexability({
+    statusCode: input.result.response.status,
+    contentType,
+    robotsMeta,
+    xRobotsTag: input.xRobotsTag,
+    canonical,
+    finalUrl: input.finalUrl.toString(),
+  });
+  const text = visibleText(input.html);
+
+  return {
+    requestedUrl: input.rawUrl,
+    url: input.finalUrl.toString(),
+    redirectChain: input.result.redirectChain,
+    statusCode: input.result.response.status,
+    responseMs: input.result.elapsed,
+    contentType,
+    contentLengthBytes: input.result.bytes,
+    title,
+    metaDescription: findMeta(input.html, "description"),
+    canonical,
+    robotsMeta,
+    xRobotsTag: input.xRobotsTag,
+    htmlLang: findHtmlLang(input.html),
+    metaRefresh: findMetaRefresh(input.html),
+    hreflangs,
+    h1s,
+    h2s,
+    h3s,
+    h4s,
+    h5s,
+    h6s,
+    wordCount: text ? text.split(/\s+/).filter(Boolean).length : 0,
+    internalLinks: links.internal,
+    externalLinks: links.external,
+    internalLinkCount: links.internal.length,
+    externalLinkCount: links.external.length,
+    imageCount: images.imageCount,
+    missingAltCount: images.missingAltCount,
+    structuredDataCount: structured.count,
+    invalidStructuredDataCount: structured.invalid,
+    contentHash: createHash("sha256").update(text || input.html).digest("hex"),
+    contentSimhash: simhash64(text),
+    rendered: input.rendered,
+    renderReason: input.renderReason,
+    indexable: indexState.indexable,
+    indexabilityReason: indexState.reason,
+    fetchError: null,
+    metadata: {
+      internal_links_sample: links.internal.slice(0, 25).map((link) => link.url),
+      external_links_sample: links.external.slice(0, 10).map((link) => link.url),
+      email_sample: links.emails.slice(0, 10),
+      phone_sample: links.phones.slice(0, 10),
+      redirect_count: input.result.redirectChain.length,
+      script_count: (input.html.match(/<script\b/gi) || []).length,
+      canonical_matches_final:
+        normalizeComparableUrl(canonical) ===
+        normalizeComparableUrl(input.finalUrl.toString()),
+      rendered: input.rendered,
+      render_reason: input.renderReason,
+    },
+  };
+}
+
+export async function crawlPage(
+  rawUrl: string,
+  expectedOrigin: string,
+  options: {
+    jsRenderMode?: "off" | "auto" | "always";
+  } = {},
+): Promise<CrawledPage> {
+  try {
+    const result = await safeFetch(rawUrl, { retries: 2 });
+    let finalUrl = result.url;
     const contentType = result.response.headers.get("content-type");
     const xRobotsTag = result.response.headers.get("x-robots-tag");
-    const html = result.text;
+    let html = result.text;
 
     if (new URL(finalUrl).origin !== expectedOrigin) {
       return {
-        ...emptyPage(rawUrl, "Final URL left the project origin; body was not analyzed."),
+        ...emptyPage(
+          rawUrl,
+          "Final URL left the project origin; body was not analyzed.",
+        ),
         url: finalUrl.toString(),
         redirectChain: result.redirectChain,
         statusCode: result.response.status,
@@ -528,6 +784,7 @@ export async function crawlPage(rawUrl: string, expectedOrigin: string): Promise
         contentLengthBytes: result.bytes,
         xRobotsTag,
         contentHash: createHash("sha256").update(html).digest("hex"),
+        contentSimhash: null,
         indexable: indexState.indexable,
         indexabilityReason: indexState.reason,
         fetchError: null,
@@ -535,73 +792,46 @@ export async function crawlPage(rawUrl: string, expectedOrigin: string): Promise
       };
     }
 
-    const title = tagContent(html, "title", 1)[0] || null;
-    const h1s = tagContent(html, "h1", 50);
-    const h2s = tagContent(html, "h2", 100);
-    const h3s = tagContent(html, "h3", 150);
-    const h4s = tagContent(html, "h4", 150);
-    const h5s = tagContent(html, "h5", 150);
-    const h6s = tagContent(html, "h6", 150);
-    const links = extractLinks(html, finalUrl);
-    const images = imageStats(html);
-    const structured = structuredDataStats(html);
-    const robotsMeta = findMeta(html, "robots");
-    const canonical = findCanonical(html, finalUrl);
-    const hreflangs = findHreflangs(html, finalUrl);
-    const indexState = indexability({
-      statusCode: result.response.status,
-      contentType,
-      robotsMeta,
+    let page = analyzeHtmlPage({
+      rawUrl,
+      finalUrl,
+      result,
+      html,
       xRobotsTag,
-      canonical,
-      finalUrl: finalUrl.toString(),
+      rendered: false,
+      renderReason: null,
     });
 
-    return {
-      requestedUrl: rawUrl,
-      url: finalUrl.toString(),
-      redirectChain: result.redirectChain,
-      statusCode: result.response.status,
-      responseMs: result.elapsed,
-      contentType,
-      contentLengthBytes: result.bytes,
-      title,
-      metaDescription: findMeta(html, "description"),
-      canonical,
-      robotsMeta,
-      xRobotsTag,
-      htmlLang: findHtmlLang(html),
-      metaRefresh: findMetaRefresh(html),
-      hreflangs,
-      h1s,
-      h2s,
-      h3s,
-      h4s,
-      h5s,
-      h6s,
-      wordCount: visibleWordCount(html),
-      internalLinks: links.internal,
-      externalLinks: links.external,
-      internalLinkCount: links.internal.length,
-      externalLinkCount: links.external.length,
-      imageCount: images.imageCount,
-      missingAltCount: images.missingAltCount,
-      structuredDataCount: structured.count,
-      invalidStructuredDataCount: structured.invalid,
-      contentHash: createHash("sha256").update(html).digest("hex"),
-      indexable: indexState.indexable,
-      indexabilityReason: indexState.reason,
-      fetchError: null,
-      metadata: {
-        internal_links_sample: links.internal.slice(0, 25).map((link) => link.url),
-        external_links_sample: links.external.slice(0, 10).map((link) => link.url),
-        email_sample: links.emails.slice(0, 10),
-        phone_sample: links.phones.slice(0, 10),
-        redirect_count: result.redirectChain.length,
-        canonical_matches_final:
-          normalizeComparableUrl(canonical) === normalizeComparableUrl(finalUrl.toString()),
-      },
-    };
+    const renderMode = options.jsRenderMode || "off";
+    const renderReason =
+      renderMode === "always"
+        ? "mode_always"
+        : renderMode === "auto" && shouldAutoRender(html, page)
+          ? "thin_or_js_dependent_http_html"
+          : null;
+
+    if (renderReason) {
+      try {
+        const rendered = await renderWithRemoteService(finalUrl.toString());
+        html = rendered.html;
+        finalUrl = new URL(rendered.finalUrl, finalUrl);
+        page = analyzeHtmlPage({
+          rawUrl,
+          finalUrl,
+          result,
+          html,
+          xRobotsTag,
+          rendered: true,
+          renderReason,
+        });
+      } catch (error) {
+        page.metadata.js_render_error =
+          error instanceof Error ? error.message : "JS rendering failed.";
+        page.renderReason = renderReason;
+      }
+    }
+
+    return page;
   } catch (error) {
     return emptyPage(
       rawUrl,
