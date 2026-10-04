@@ -615,3 +615,32 @@ button, input, textarea { font: inherit; }
 .automationChain span { color: var(--muted); font-size: 8px; line-height: 1.4; }
 .automationTaskCard form { margin: 0; }
 @media (max-width: 820px) { .automationTaskList { grid-template-columns: 1fr; } }
+
+.budgetForm { display: grid; grid-template-columns: repeat(5,minmax(120px,1fr)) auto; gap: 10px; align-items: end; }
+.budgetForm label { display: grid; gap: 6px; font-size: 9px; font-weight: 700; }
+.budgetForm input, .budgetForm select { border: 1px solid var(--line); border-radius: 8px; background: white; padding: 9px 10px; }
+.budgetProjectGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+.budgetProjectCard { border: 1px solid var(--line); background: white; border-radius: 11px; padding: 13px; }
+.budgetProjectHeader h2 { margin: 3px 0 10px; font-size: 12px; }
+.budgetCategoryList { display: grid; }
+.budgetCategoryRow { border-top: 1px solid var(--line); padding: 10px 0; }
+.budgetCategoryTop { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.budgetCategoryTop > div:first-child { display: grid; gap: 2px; }
+.budgetCategoryTop strong { font-size: 9px; }
+.budgetCategoryTop span, .budgetCategoryRow small { color: var(--muted); font-size: 8px; }
+.budgetFlags { display: flex; align-items: center; gap: 6px; }
+.budgetFlags > span { background: #f2f4f7; padding: 3px 5px; border-radius: 999px; font-size: 7px; text-transform: uppercase; }
+.budgetFlags form { margin: 0; }
+.budgetFlags button { padding: 5px 7px; font-size: 7px; }
+.budgetProgress { height: 6px; border-radius: 999px; background: #eaecf0; overflow: hidden; margin: 8px 0 5px; }
+.budgetProgress > div { height: 100%; background: #344054; border-radius: 999px; }
+@media (max-width: 1100px) {
+  .budgetForm { grid-template-columns: repeat(3,minmax(120px,1fr)); }
+}
+@media (max-width: 780px) {
+  .budgetProjectGrid { grid-template-columns: 1fr; }
+  .budgetForm { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 520px) {
+  .budgetForm { grid-template-columns: 1fr; }
+}
