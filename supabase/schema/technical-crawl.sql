@@ -182,6 +182,8 @@ create table if not exists public.technical_crawl_schedules (
     check (last_status in ('idle','running','succeeded','partial','failed','paused')),
   last_error text,
   failure_count integer not null default 0,
+  rotation_enabled boolean not null default true,
+  sitemap_offset integer not null default 0 check (sitemap_offset >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   foreign key (project_id,owner_id)
