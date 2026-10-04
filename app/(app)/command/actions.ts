@@ -67,6 +67,9 @@ export async function sendChiefCommand(formData: FormData) {
     { data: salesCampaigns },
     { data: salesLeads },
     { data: technicalSchedules },
+    { data: rankSettings },
+    { data: trackedKeywords },
+    { data: opportunitySettings },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -130,6 +133,22 @@ export async function sendChiefCommand(formData: FormData) {
       .neq("status", "cancelled")
       .order("updated_at", { ascending: false })
       .limit(80),
+    supabase
+      .from("rank_tracking_settings")
+      .select("project_id,active,auto_discover_enabled,auto_findings_enabled,max_auto_keywords,min_impressions_28d,position_min,position_max,default_location_code,default_language_code,default_device,daily_high_priority_limit,last_seeded_at,last_worker_run_at")
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("tracked_keywords")
+      .select("id,project_id,keyword,source,priority,cadence,depth,location_code,language_code,device,active,last_position,last_ranking_url,last_checked_at,last_status")
+      .eq("active", true)
+      .order("updated_at", { ascending: false })
+      .limit(250),
+    supabase
+      .from("opportunity_scan_settings")
+      .select("project_id,enabled,scan_gsc,scan_ga4,scan_rank,cadence,last_run_at,last_data_date,last_status,last_error")
+      .order("updated_at", { ascending: false })
+      .limit(100),
   ]);
 
   if (!chief || !["testing", "active"].includes(chief.status)) {
@@ -147,6 +166,9 @@ export async function sendChiefCommand(formData: FormData) {
       sales_campaigns: salesCampaigns || [],
       sales_leads: salesLeads || [],
       technical_crawl_schedules: technicalSchedules || [],
+      rank_tracking_settings: rankSettings || [],
+      tracked_keywords: trackedKeywords || [],
+      opportunity_engine_settings: opportunitySettings || [],
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
@@ -167,6 +189,12 @@ export async function sendChiefCommand(formData: FormData) {
         "convert_project_to_client",
         "create_technical_crawl_schedule",
         "manage_technical_crawl_schedule",
+        "configure_rank_tracking",
+        "add_tracked_keywords",
+        "seed_rank_from_gsc",
+        "run_rank_tracking",
+        "configure_opportunity_engine",
+        "run_opportunity_scan",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
