@@ -41,6 +41,8 @@ export default async function AutomationsPage({
     { data: salesCampaigns },
     { data: salesRuns },
     { data: technicalSchedules },
+    { data: rankSettings },
+    { data: opportunitySettings },
   ] = await Promise.all([
     supabase.from("projects").select("id,name,domain").order("name"),
     supabase
@@ -94,6 +96,16 @@ export default async function AutomationsPage({
       .neq("status", "cancelled")
       .order("updated_at", { ascending: false })
       .limit(50),
+    supabase
+      .from("rank_tracking_settings")
+      .select("project_id,active,auto_discover_enabled,last_seeded_at,last_worker_run_at")
+      .eq("active", true)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("opportunity_scan_settings")
+      .select("project_id,enabled,scan_gsc,scan_ga4,scan_rank,cadence,last_run_at,last_data_date,last_status,last_error,consecutive_failures")
+      .eq("enabled", true)
+      .order("updated_at", { ascending: false }),
   ]);
 
   const projectMap = new Map((projects || []).map((project) => [project.id, project]));
@@ -116,6 +128,11 @@ export default async function AutomationsPage({
   const activeTechnicalSchedules = (technicalSchedules || []).filter((item) =>
     ["active", "running"].includes(item.status),
   ).length;
+  const rankWorkerReady = Boolean(
+    workerReady && process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
+  );
+  const activeRankProjects = rankSettings?.length || 0;
+  const activeOpportunityProjects = opportunitySettings?.length || 0;
 
   return (
     <div className="page">
@@ -163,6 +180,16 @@ export default async function AutomationsPage({
           <span>Technical crawler</span>
           <strong>{activeTechnicalSchedules}</strong>
           <small>{workerReady ? "Deterministic worker ready" : "Worker paused"}</small>
+        </article>
+        <article className="healthCard">
+          <span>Rank tracking</span>
+          <strong>{activeRankProjects}</strong>
+          <small>{rankWorkerReady ? "Paid SERP worker ready" : "Worker paused / provider missing"}</small>
+        </article>
+        <article className="healthCard">
+          <span>Opportunity Engine</span>
+          <strong>{activeOpportunityProjects}</strong>
+          <small>{workerReady ? "Warehouse worker ready" : "Worker paused"}</small>
         </article>
         <article className="healthCard">
           <span>Running / queued jobs</span>
@@ -255,6 +282,104 @@ export default async function AutomationsPage({
           <div className="emptyState smallEmpty">
             <strong>No scheduled agent tasks yet</strong>
             <span>Ask Chief Operator to create a one-time, daily, weekly or monthly task.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Rank tracking automation</h2>
+            <p>Exact SERP checks run only for due keywords and respect project SERP budget hard stops.</p>
+          </div>
+        </div>
+        {(rankSettings || []).length ? (
+          <div className="automationTaskList">
+            {(rankSettings || []).map((settings) => {
+              const project = projectMap.get(settings.project_id);
+              return (
+                <article className="automationTaskCard" key={settings.project_id}>
+                  <div className="automationTaskTop">
+                    <div>
+                      <p className="eyebrow">{project?.name || "Project"} · rank tracker</p>
+                      <h3>{settings.auto_discover_enabled ? "GSC-assisted tracking" : "Manual keyword universe"}</h3>
+                    </div>
+                    <span className="jobStatus job-active">active</span>
+                  </div>
+                  <div className="automationTaskMeta">
+                    <span>Auto discovery: {settings.auto_discover_enabled ? "on" : "off"}</span>
+                    <span>Last seed: {formatDate(settings.last_seeded_at)}</span>
+                    <span>Last worker: {formatDate(settings.last_worker_run_at)}</span>
+                  </div>
+                  {project ? (
+                    <div className="buttonRow">
+                      <Link className="ghostButton" href={"/projects/" + project.id + "/rank-tracker"}>
+                        Open Rank Tracker
+                      </Link>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="emptyState smallEmpty">
+            <span>No active project rank-tracking settings.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Opportunity Engine automation</h2>
+            <p>Warehouse GSC/GA4 and rank evidence are compared without using an LLM for data collection.</p>
+          </div>
+          <Link href="/opportunities" className="secondaryButton">Open Intelligence Inbox</Link>
+        </div>
+        {(opportunitySettings || []).length ? (
+          <div className="automationTaskList">
+            {(opportunitySettings || []).map((settings) => {
+              const project = projectMap.get(settings.project_id);
+              return (
+                <article className="automationTaskCard" key={settings.project_id}>
+                  <div className="automationTaskTop">
+                    <div>
+                      <p className="eyebrow">{project?.name || "Project"} · {settings.cadence}</p>
+                      <h3>
+                        {[
+                          settings.scan_gsc ? "GSC" : null,
+                          settings.scan_ga4 ? "GA4" : null,
+                          settings.scan_rank ? "Rank" : null,
+                        ].filter(Boolean).join(" + ")}
+                      </h3>
+                    </div>
+                    <span className={"jobStatus job-" + settings.last_status}>
+                      {settings.last_status}
+                    </span>
+                  </div>
+                  <div className="automationTaskMeta">
+                    <span>Last run: {formatDate(settings.last_run_at)}</span>
+                    <span>Latest data: {settings.last_data_date || "—"}</span>
+                    <span>Failures: {settings.consecutive_failures || 0}</span>
+                  </div>
+                  {settings.last_error ? (
+                    <p className="formMessage formError">{settings.last_error}</p>
+                  ) : null}
+                  {project ? (
+                    <div className="buttonRow">
+                      <Link className="ghostButton" href={"/opportunities?project=" + project.id}>
+                        Open intelligence
+                      </Link>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="emptyState smallEmpty">
+            <span>No projects have automatic opportunity scans enabled.</span>
           </div>
         )}
       </section>
@@ -435,6 +560,8 @@ export default async function AutomationsPage({
               <div><span>Data sync worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Sales discovery worker</span><strong>{salesWorkerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Technical crawl worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
+              <div><span>Rank tracker worker</span><strong>{rankWorkerReady ? "ready to activate" : "paused"}</strong></div>
+              <div><span>Opportunity Engine worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Failed manual jobs</span><strong>{failedJobs}</strong></div>
             </div>
             <div className="buttonRow">
