@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifySalesLead } from "@/lib/sales/qualification";
+import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
 import {
   auditSalesLeadProspect,
   convertSalesLeadToProspect,
@@ -120,44 +121,103 @@ export async function qualifyLead(leadId: string) {
 export async function qualifyCampaignTopLeads(campaignId: string) {
   const { supabase, ownerId } = await owner();
 
-  const { data: rows, error } = await supabase
-    .from("sales_campaign_leads")
-    .select("lead_id,sales_leads(score,qualification_status)")
-    .eq("campaign_id", campaignId)
-    .eq("owner_id", ownerId)
-    .order("discovered_at", { ascending: false })
-    .limit(100);
+  try {
+    const result = await qualifyTopCampaignLeads({
+      ownerId,
+      campaignId,
+      limit: 10,
+      client: supabase,
+    });
 
-  if (error) redirect(`/sales?error=${encodeURIComponent(error.message)}`);
+    revalidatePath("/sales");
+    redirect(
+      "/sales?message=" +
+        encodeURIComponent(
+          "Qualified " +
+            String(result.succeeded) +
+            "/" +
+            String(result.requested) +
+            " top leads" +
+            (result.failed ? " · " + String(result.failed) + " failed" : ""),
+        ),
+    );
+  } catch (error) {
+    redirect(
+      "/sales?error=" +
+        encodeURIComponent(
+          error instanceof Error ? error.message : "Batch qualification failed",
+        ),
+    );
+  }
+}
 
-  const pending = (rows || [])
-    .filter((row) => {
-      const lead = Array.isArray(row.sales_leads) ? row.sales_leads[0] : row.sales_leads;
-      return lead?.qualification_status === "pending";
+export async function saveSalesCampaignAutomation(
+  campaignId: string,
+  formData: FormData,
+) {
+  const enabled = formData.get("autoEnabled") === "on";
+  const scheduleKind = text(formData, "scheduleKind") || "weekly";
+  const timeLocal = text(formData, "timeLocal") || "10:00";
+  const timezone = text(formData, "timezone") || "Europe/Istanbul";
+  const autoQualifyCount = Math.min(
+    Math.max(Number(text(formData, "autoQualifyCount") || "5"), 0),
+    10,
+  );
+  const daysOfWeek = text(formData, "daysOfWeek")
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6);
+  const dayOfMonth = Math.min(
+    Math.max(Number(text(formData, "dayOfMonth") || "1"), 1),
+    31,
+  );
+
+  if (!["daily", "weekly", "monthly"].includes(scheduleKind)) {
+    redirect("/sales?error=Invalid%20sales%20automation%20schedule");
+  }
+  if (!/^\d{2}:\d{2}$/.test(timeLocal)) {
+    redirect("/sales?error=Automation%20time%20must%20use%20HH:MM");
+  }
+  if (scheduleKind === "weekly" && !daysOfWeek.length) {
+    redirect("/sales?error=Weekly%20automation%20requires%20days%20of%20week");
+  }
+
+  const { supabase, ownerId } = await owner();
+  const scheduleConfig = {
+    time_local: timeLocal,
+    days_of_week: scheduleKind === "weekly" ? daysOfWeek : [],
+    day_of_month: scheduleKind === "monthly" ? dayOfMonth : null,
+  };
+
+  const { error } = await supabase
+    .from("sales_campaigns")
+    .update({
+      auto_discovery_enabled: enabled,
+      schedule_kind: scheduleKind,
+      schedule_config: scheduleConfig,
+      timezone,
+      auto_qualify_count: autoQualifyCount,
+      last_auto_status: enabled ? "idle" : "paused",
+      last_auto_error: null,
+      status: enabled ? "active" : undefined,
+      updated_at: new Date().toISOString(),
     })
-    .sort((a, b) => {
-      const aLead = Array.isArray(a.sales_leads) ? a.sales_leads[0] : a.sales_leads;
-      const bLead = Array.isArray(b.sales_leads) ? b.sales_leads[0] : b.sales_leads;
-      return Number(bLead?.score || 0) - Number(aLead?.score || 0);
-    })
-    .slice(0, 10);
+    .eq("id", campaignId)
+    .eq("owner_id", ownerId);
 
-  let succeeded = 0;
-  const errors: string[] = [];
-  for (const row of pending) {
-    try {
-      await qualifySalesLead({ ownerId, leadId: row.lead_id, client: supabase });
-      succeeded += 1;
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Qualification failed");
-    }
+  if (error) {
+    redirect("/sales?error=" + encodeURIComponent(error.message));
   }
 
   revalidatePath("/sales");
+  revalidatePath("/automations");
   redirect(
-    `/sales?message=${encodeURIComponent(
-      `Qualified ${succeeded}/${pending.length} top leads${errors.length ? ` · ${errors.length} failed` : ""}`,
-    )}`,
+    "/sales?message=" +
+      encodeURIComponent(
+        enabled
+          ? "Sales campaign automation enabled"
+          : "Sales campaign automation disabled",
+      ),
   );
 }
 
