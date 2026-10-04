@@ -358,36 +358,43 @@ export async function processGoogleSyncJob(
     .eq("id", job.id);
 
   try {
-    const result =
-      job.source === "gsc"
-        ? await syncGscDate({
-            supabase,
-            ownerId: job.owner_id,
-            projectId: job.project_id,
-            date,
-          })
-        : await syncGa4Date({
-            supabase,
-            ownerId: job.owner_id,
-            projectId: job.project_id,
-            date,
-          });
+    let totalRows = 0;
+    let datasetRows: Record<string, number>;
+
+    if (job.source === "gsc") {
+      const result = await syncGscDate({
+        supabase,
+        ownerId: job.owner_id,
+        projectId: job.project_id,
+        date,
+      });
+
+      totalRows = result.totalRows;
+      datasetRows = {
+        page_daily: result.pageRows,
+        query_daily: result.queryRows,
+        query_page_daily: result.queryPageRows,
+      };
+    } else {
+      const result = await syncGa4Date({
+        supabase,
+        ownerId: job.owner_id,
+        projectId: job.project_id,
+        date,
+      });
+
+      totalRows = result.totalRows;
+      datasetRows = {
+        landing_page_daily: result.landingRows,
+        event_daily: result.eventRows,
+      };
+    }
 
     await updateSyncState({
       supabase,
       job,
       date,
-      datasetRows:
-        job.source === "gsc"
-          ? {
-              page_daily: result.pageRows,
-              query_daily: result.queryRows,
-              query_page_daily: result.queryPageRows,
-            }
-          : {
-              landing_page_daily: result.landingRows,
-              event_daily: result.eventRows,
-            },
+      datasetRows,
     });
 
     const nextDate = addDays(date, 1);
@@ -400,15 +407,16 @@ export async function processGoogleSyncJob(
         cursor_date: completed ? date : nextDate,
         result: {
           last_date: date,
-          last_rows: result.totalRows,
+          last_rows: totalRows,
           source: job.source,
+          dataset_rows: datasetRows,
         },
         completed_at: completed ? new Date().toISOString() : null,
       })
       .eq("id", job.id);
 
     if (error) throw error;
-    return { completed, date, rows: result.totalRows };
+    return { completed, date, rows: totalRows };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google sync failed.";
     await supabase
