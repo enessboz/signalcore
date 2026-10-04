@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type CrawlType = "http" | "prospect_audit" | "delta";
 
-type CrawlFinding = {
+export type CrawlFinding = {
   fingerprint: string;
   title: string;
   summary: string;
@@ -19,7 +19,7 @@ type CrawlFinding = {
   metadata: Record<string, unknown>;
 };
 
-type PageGraphState = {
+export type PageGraphState = {
   page: CrawledPage;
   requestedNormalized: string;
   finalNormalized: string;
@@ -29,7 +29,7 @@ type PageGraphState = {
   orphanCandidate: boolean;
 };
 
-function normalizeUrl(raw: string) {
+export function normalizeUrl(raw: string) {
   try {
     const url = new URL(raw);
     url.hash = "";
@@ -53,7 +53,7 @@ function findingKey(value: string) {
   return encodeURIComponent(value).slice(0, 420);
 }
 
-function pageFindings(state: PageGraphState): CrawlFinding[] {
+export function pageFindings(state: PageGraphState): CrawlFinding[] {
   const page = state.page;
   const out: CrawlFinding[] = [];
   const key = findingKey(page.requestedUrl);
