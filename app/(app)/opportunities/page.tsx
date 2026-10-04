@@ -68,6 +68,22 @@ export default async function OpportunitiesPage({
     ? settingsMap.get(projectFilter) || null
     : null;
 
+  let selectedCoverage: Record<string, Record<string, unknown>> = {};
+  if (projectFilter) {
+    const { data: coverageData } = await supabase.rpc(
+      "get_warehouse_coverage",
+      {
+        p_project_id: projectFilter,
+        p_days: 28,
+      },
+    );
+    selectedCoverage =
+      (coverageData || {}) as Record<string, Record<string, unknown>>;
+  }
+  const selectedGscCoverage = selectedCoverage.gsc || {};
+  const selectedQueryPageCoverage = selectedCoverage.gsc_query_page || {};
+  const selectedGa4Coverage = selectedCoverage.ga4 || {};
+
   const ordered = [...(findings || [])].sort((a, b) => {
     const importanceDiff = importanceRank(b.importance) - importanceRank(a.importance);
     if (importanceDiff) return importanceDiff;
@@ -194,6 +210,27 @@ export default async function OpportunitiesPage({
             </span>
             <span>
               Latest data: <strong>{selectedAutomation?.last_data_date || "—"}</strong>
+            </span>
+            <span>
+              GSC coverage:{" "}
+              <strong>
+                {String(selectedGscCoverage.current_days || 0)}/28 current ·{" "}
+                {String(selectedGscCoverage.previous_days || 0)}/28 previous
+              </strong>
+            </span>
+            <span>
+              Query × Page:{" "}
+              <strong>
+                {String(selectedQueryPageCoverage.current_days || 0)}/28 current ·{" "}
+                {String(selectedQueryPageCoverage.previous_days || 0)}/28 previous
+              </strong>
+            </span>
+            <span>
+              GA4 coverage:{" "}
+              <strong>
+                {String(selectedGa4Coverage.current_days || 0)}/28 current ·{" "}
+                {String(selectedGa4Coverage.previous_days || 0)}/28 previous
+              </strong>
             </span>
             {selectedAutomation?.last_error ? (
               <span className="formError">{selectedAutomation.last_error}</span>
