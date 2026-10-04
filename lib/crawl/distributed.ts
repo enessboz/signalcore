@@ -429,7 +429,7 @@ export async function startQueuedCrawl(input: {
       crawl_run_id: run.id,
       project_id: input.projectId,
       owner_id: input.ownerId,
-      url: candidate.url,
+      url: normalized,
       normalized_url: normalized,
       depth: candidate.depth,
       source: candidate.source,
@@ -527,9 +527,9 @@ function pageRow(input: {
     crawl_run_id: input.run.id,
     project_id: input.run.project_id,
     owner_id: input.run.owner_id,
-    requested_url: input.page.requestedUrl,
-    url: input.page.requestedUrl,
-    final_url: input.page.url,
+    requested_url: normalizeUrl(input.page.requestedUrl),
+    url: normalizeUrl(input.page.requestedUrl),
+    final_url: normalizeUrl(input.page.url),
     redirect_chain: input.page.redirectChain,
     status_code: input.page.statusCode,
     response_ms: input.page.responseMs,
@@ -654,6 +654,26 @@ function nearDuplicateGroups(pages: StoredPage[]) {
   return [...grouped.values()].filter((group) => group.length >= 2);
 }
 
+async function loadQueueRows(client: SupabaseClient, runId: string) {
+  const rows: Array<{
+    normalized_url: string;
+    source: string;
+    status: string;
+    robots_allowed: boolean | null;
+  }> = [];
+  for (let from = 0; from < 100_000; from += 1000) {
+    const { data, error } = await client
+      .from("crawl_url_queue")
+      .select("normalized_url,source,status,robots_allowed")
+      .eq("crawl_run_id", runId)
+      .range(from, from + 999);
+    if (error) throw new Error("Crawl queue could not be finalized: " + error.message);
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
 async function loadRunPages(client: SupabaseClient, runId: string) {
   const pages: StoredPage[] = [];
   for (let from = 0; from < 100_000; from += 1000) {
@@ -717,14 +737,15 @@ async function finalizeQueuedCrawl(
   run: CrawlRunRow,
 ) {
   const pages = await loadRunPages(client, run.id);
-  const { data: queueRowsData, error: queueError } = await client
-    .from("crawl_url_queue")
-    .select("normalized_url,source,status,robots_allowed")
-    .eq("crawl_run_id", run.id)
-    .limit(100_000);
-  if (queueError) throw new Error("Crawl queue could not be finalized: " + queueError.message);
+  const queueRowsAll = await loadQueueRows(client, run.id);
 
-  const queueRowsAll = queueRowsData || [];
+  const { data: graphSummary, error: graphError } = await client.rpc(
+    "finalize_distributed_crawl_graph",
+    { p_run_id: run.id },
+  );
+  if (graphError) {
+    throw new Error("Distributed crawl graph finalization failed: " + graphError.message);
+  }
   const sitemapSet = new Set(
     queueRowsAll
       .filter((row) => row.source === "sitemap")
@@ -906,6 +927,10 @@ async function finalizeQueuedCrawl(
     near_duplicate_groups: nearGroups.length,
     finding_count_added_at_finalize: aggregate.length,
     avg_response_ms: avgResponse,
+    max_crawl_depth:
+      graphSummary && typeof graphSummary === "object"
+        ? Number((graphSummary as { max_depth?: number }).max_depth || 0)
+        : 0,
   };
 
   await client
@@ -1097,8 +1122,8 @@ export async function processQueuedCrawlBatch(input: {
         crawl_run_id: run.id,
         project_id: run.project_id,
         owner_id: run.owner_id,
-        source_url: page.url,
-        target_url: link.url,
+        source_url: normalizeUrl(page.url),
+        target_url: normalizeUrl(link.url),
         link_scope: "internal",
         anchor_text: link.anchorText,
         rel: link.rel,
@@ -1109,8 +1134,8 @@ export async function processQueuedCrawlBatch(input: {
         crawl_run_id: run.id,
         project_id: run.project_id,
         owner_id: run.owner_id,
-        source_url: page.url,
-        target_url: link.url,
+        source_url: normalizeUrl(page.url),
+        target_url: normalizeUrl(link.url),
         link_scope: "external",
         anchor_text: link.anchorText,
         rel: link.rel,
@@ -1175,7 +1200,7 @@ export async function processQueuedCrawlBatch(input: {
           crawl_run_id: run.id,
           project_id: run.project_id,
           owner_id: run.owner_id,
-          url: link.url,
+          url: normalized,
           normalized_url: normalized,
           depth: Math.min(item.depth + 1, 1000),
           source: "link",
