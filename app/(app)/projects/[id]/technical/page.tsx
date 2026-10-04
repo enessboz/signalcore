@@ -201,7 +201,15 @@ export default async function TechnicalAuditPage({
     findings = (findingResult.data || []) as typeof findings;
     internalLinkCount = internalLinks.count || 0;
     externalLinkCount = externalLinks.count || 0;
-    robotsAudit = robotsResult.data as typeof robotsAudit;
+    robotsAudit = robotsResult.data as null | {
+      robots_url: string;
+      status_code: number | null;
+      fetch_status: string;
+      crawl_delay_ms: number | null;
+      blocks_all: boolean;
+      sitemap_urls: unknown;
+      error: string | null;
+    };
     performanceResults = (performanceResult.data || []) as typeof performanceResults;
   }
 
