@@ -171,12 +171,51 @@ export async function executeChiefActions(input: {
           "request_report",
           "run_technical_audit",
           "run_prospect_audit",
+          "link_github_repo",
         ].includes(action.type) &&
         !projectId
       ) {
         throw new Error(
           `Project could not be resolved from "${action.project_ref || "empty reference"}".`,
         );
+      }
+
+      if (action.type === "link_github_repo") {
+        const repoFullName = action.repo_full_name?.trim();
+        if (!repoFullName || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoFullName)) {
+          throw new Error("A valid GitHub repo in owner/repo format is required.");
+        }
+
+        const { data: repository, error } = await supabase
+          .from("project_repositories")
+          .upsert(
+            {
+              project_id: projectId!,
+              owner_id: input.ownerId,
+              provider: "github",
+              repo_full_name: repoFullName,
+              access_mode: "read_only",
+              status: "active",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "project_id,provider,repo_full_name" },
+          )
+          .select("id,repo_full_name")
+          .single();
+
+        if (error || !repository) {
+          throw new Error(error?.message || "GitHub repository could not be linked.");
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          targetAgentKey: "developer",
+          summary: `Linked GitHub repository ${repository.repo_full_name} in read-only mode.`,
+          data: { repository_id: repository.id, repo_full_name: repository.repo_full_name },
+        });
+        continue;
       }
 
       if (action.type === "run_technical_audit") {
