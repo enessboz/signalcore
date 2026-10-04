@@ -189,3 +189,8 @@ export async function POST(request: NextRequest) {
     time: now.toISOString(),
   });
 }
+
+// Vercel Cron invokes production cron routes with GET.
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
