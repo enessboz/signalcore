@@ -9,6 +9,14 @@ function isoDaysAgo(days: number) {
   return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 }
 
+function nextIsoDay(iso: string) {
+  const date = new Date(iso + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+const SAFE_RUNTIME_MS = 240_000;
+
 export async function POST(request: NextRequest) {
   const expected = process.env.CRON_SECRET;
   const auth = request.headers.get("authorization");
@@ -24,6 +32,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const startedAt = Date.now();
   const supabase = createAdminClient();
 
   const { data: bindings, error: bindingError } = await supabase
@@ -95,22 +104,50 @@ export async function POST(request: NextRequest) {
   const processed: Array<Record<string, unknown>> = [];
 
   for (const job of jobs || []) {
-    try {
-      const result = await processGoogleSyncJob(job, supabase);
-      processed.push({
-        id: job.id,
-        project_id: job.project_id,
-        source: job.source,
-        ...result,
-      });
-    } catch (error) {
-      processed.push({
-        id: job.id,
-        project_id: job.project_id,
-        source: job.source,
-        error: error instanceof Error ? error.message : "Sync failed",
-      });
+    if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+
+    const maxDates = job.source === "gsc" ? 2 : 4;
+    let currentJob = { ...job };
+    let datesProcessed = 0;
+    let rowsProcessed = 0;
+    let completed = false;
+    let lastDate: string | null = null;
+    let failure: string | null = null;
+
+    for (let step = 0; step < maxDates; step += 1) {
+      if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+
+      try {
+        const result = await processGoogleSyncJob(currentJob, supabase);
+        datesProcessed += result.date ? 1 : 0;
+        rowsProcessed += Number(result.rows || 0);
+        completed = result.completed;
+        lastDate = result.date;
+
+        if (result.completed || !result.date) break;
+
+        currentJob = {
+          ...currentJob,
+          cursor_date: nextIsoDay(result.date),
+          status: "queued",
+        };
+      } catch (error) {
+        failure = error instanceof Error ? error.message : "Sync failed";
+        break;
+      }
     }
+
+    processed.push({
+      id: job.id,
+      project_id: job.project_id,
+      source: job.source,
+      mode: job.mode,
+      completed,
+      dates_processed: datesProcessed,
+      rows_processed: rowsProcessed,
+      last_date: lastDate,
+      error: failure,
+    });
   }
 
   return NextResponse.json({
@@ -118,6 +155,7 @@ export async function POST(request: NextRequest) {
     enqueue_results: enqueueResults,
     jobs_processed: processed.length,
     processed,
+    elapsed_ms: Date.now() - startedAt,
     time: new Date().toISOString(),
   });
 }
