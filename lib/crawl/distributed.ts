@@ -55,6 +55,18 @@ type CrawlRunRow = {
   summary: Record<string, unknown> | null;
 };
 
+type BaselinePage = {
+  requested_url: string | null;
+  url: string;
+  final_url: string | null;
+  status_code: number | null;
+  title: string | null;
+  canonical: string | null;
+  indexable: boolean | null;
+  indexability_reason: string | null;
+  content_hash: string | null;
+};
+
 type StoredPage = {
   id: string;
   requested_url: string | null;
@@ -674,6 +686,198 @@ async function loadQueueRows(client: SupabaseClient, runId: string) {
   return rows;
 }
 
+async function loadBaselinePages(
+  client: SupabaseClient,
+  input: {
+    projectId: string;
+    ownerId: string;
+    currentRunId: string;
+  },
+) {
+  const { data: baselineRun, error: baselineError } = await client
+    .from("crawl_runs")
+    .select("id")
+    .eq("project_id", input.projectId)
+    .eq("owner_id", input.ownerId)
+    .in("status", ["succeeded", "partial"])
+    .neq("id", input.currentRunId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (baselineError) {
+    throw new Error("Delta baseline could not be resolved: " + baselineError.message);
+  }
+  if (!baselineRun?.id) {
+    return { baselineRunId: null as string | null, pages: [] as BaselinePage[] };
+  }
+
+  const pages: BaselinePage[] = [];
+  for (let from = 0; from < 100_000; from += 1000) {
+    const { data, error } = await client
+      .from("crawl_pages")
+      .select("requested_url,url,final_url,status_code,title,canonical,indexable,indexability_reason,content_hash")
+      .eq("crawl_run_id", baselineRun.id)
+      .range(from, from + 999);
+    if (error) {
+      throw new Error("Delta baseline pages could not be loaded: " + error.message);
+    }
+    pages.push(...((data || []) as BaselinePage[]));
+    if (!data || data.length < 1000) break;
+  }
+
+  return { baselineRunId: baselineRun.id as string, pages };
+}
+
+function distributedDeltaFindings(
+  current: StoredPage[],
+  baseline: BaselinePage[],
+) {
+  const baselineByUrl = new Map<string, BaselinePage>();
+  for (const page of baseline) {
+    baselineByUrl.set(normalizeUrl(page.requested_url || page.url), page);
+  }
+
+  const findings: CrawlFinding[] = [];
+  let compared = 0;
+  let newUrls = 0;
+  let contentChanges = 0;
+  let statusChanges = 0;
+  let titleChanges = 0;
+  let canonicalChanges = 0;
+  let indexabilityChanges = 0;
+
+  for (const page of current) {
+    const url = normalizeUrl(page.requested_url || page.url);
+    const previous = baselineByUrl.get(url);
+    if (!previous) {
+      newUrls += 1;
+      continue;
+    }
+    compared += 1;
+
+    if (
+      previous.content_hash &&
+      page.content_hash &&
+      previous.content_hash !== page.content_hash
+    ) {
+      contentChanges += 1;
+    }
+
+    if (previous.status_code !== page.status_code) {
+      statusChanges += 1;
+      if (
+        previous.status_code !== null &&
+        previous.status_code < 400 &&
+        page.status_code !== null &&
+        page.status_code >= 400
+      ) {
+        findings.push({
+          fingerprint: "crawl:regression-status:" + encodeURIComponent(url).slice(0, 400),
+          findingType: "regression",
+          title: "HTTP status regression",
+          summary:
+            url +
+            " changed from HTTP " +
+            previous.status_code +
+            " to HTTP " +
+            page.status_code +
+            ".",
+          importance: page.status_code >= 500 ? "high" : "medium",
+          affectedScope: {
+            url,
+            previous_status: previous.status_code,
+            current_status: page.status_code,
+          },
+          recommendedAction:
+            "Investigate the deployment, routing or redirect change that caused this previously successful URL to return an error.",
+          metadata: {
+            rule: "delta_status_regression",
+            previous_status: previous.status_code,
+            current_status: page.status_code,
+          },
+        });
+      }
+    }
+
+    if ((previous.title || null) !== (page.title || null)) {
+      titleChanges += 1;
+      if (previous.title && !page.title) {
+        findings.push({
+          fingerprint: "crawl:regression-title-missing:" + encodeURIComponent(url).slice(0, 400),
+          findingType: "regression",
+          title: "Title disappeared since previous crawl",
+          summary:
+            url +
+            " had a title in the baseline crawl but no title is present now.",
+          importance: "medium",
+          affectedScope: {
+            url,
+            previous_title: previous.title,
+          },
+          recommendedAction:
+            "Review recent template or deployment changes that removed the title element.",
+          metadata: { rule: "delta_title_removed" },
+        });
+      }
+    }
+
+    if ((previous.canonical || null) !== (page.canonical || null)) {
+      canonicalChanges += 1;
+    }
+
+    if (previous.indexable !== page.indexable) {
+      indexabilityChanges += 1;
+      if (previous.indexable === true && page.indexable === false) {
+        findings.push({
+          fingerprint: "crawl:regression-indexability:" + encodeURIComponent(url).slice(0, 400),
+          findingType: "regression",
+          title: "Indexability regression",
+          summary:
+            url +
+            " changed from an indexable candidate to non-indexable (" +
+            String(page.indexability_reason || "unknown reason") +
+            ").",
+          importance: "high",
+          affectedScope: {
+            url,
+            previous_indexable: true,
+            current_indexable: false,
+            previous_reason: previous.indexability_reason,
+            current_reason: page.indexability_reason,
+          },
+          recommendedAction:
+            "Validate whether this change is intentional. Review status, robots directives and canonical behavior before considering the deployment healthy.",
+          metadata: {
+            rule: "delta_indexability_regression",
+            previous_reason: previous.indexability_reason,
+            current_reason: page.indexability_reason,
+          },
+        });
+      }
+    }
+  }
+
+  return {
+    findings,
+    summary: {
+      compared_urls: compared,
+      new_urls: newUrls,
+      content_changes: contentChanges,
+      status_changes: statusChanges,
+      title_changes: titleChanges,
+      canonical_changes: canonicalChanges,
+      indexability_changes: indexabilityChanges,
+      changed_urls:
+        contentChanges +
+        statusChanges +
+        titleChanges +
+        canonicalChanges +
+        indexabilityChanges,
+    },
+  };
+}
+
 async function loadRunPages(client: SupabaseClient, runId: string) {
   const pages: StoredPage[] = [];
   for (let from = 0; from < 100_000; from += 1000) {
@@ -752,7 +956,38 @@ async function finalizeQueuedCrawl(
       .map((row) => row.normalized_url),
   );
 
+  let deltaSummary: Record<string, unknown> | null = null;
+  let deltaFindings: CrawlFinding[] = [];
+  if (run.crawl_type === "delta") {
+    const baseline = await loadBaselinePages(client, {
+      projectId: run.project_id,
+      ownerId: run.owner_id,
+      currentRunId: run.id,
+    });
+    if (baseline.baselineRunId) {
+      const delta = distributedDeltaFindings(pages, baseline.pages);
+      deltaFindings = delta.findings;
+      deltaSummary = {
+        baseline_run_id: baseline.baselineRunId,
+        ...delta.summary,
+      };
+    } else {
+      deltaSummary = {
+        baseline_run_id: null,
+        compared_urls: 0,
+        new_urls: pages.length,
+        content_changes: 0,
+        status_changes: 0,
+        title_changes: 0,
+        canonical_changes: 0,
+        indexability_changes: 0,
+        changed_urls: pages.length,
+      };
+    }
+  }
+
   const aggregate: CrawlFinding[] = [
+    ...deltaFindings,
     ...exactDuplicateFindings(pages, "title", "title"),
     ...exactDuplicateFindings(pages, "meta_description", "meta description"),
     ...exactDuplicateFindings(pages, "content_hash", "content"),
@@ -927,6 +1162,7 @@ async function finalizeQueuedCrawl(
     near_duplicate_groups: nearGroups.length,
     finding_count_added_at_finalize: aggregate.length,
     avg_response_ms: avgResponse,
+    delta: deltaSummary,
     max_crawl_depth:
       graphSummary && typeof graphSummary === "object"
         ? Number((graphSummary as { max_depth?: number }).max_depth || 0)
