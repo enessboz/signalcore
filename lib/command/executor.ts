@@ -12,6 +12,7 @@ import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForL
 import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
 import { runRankTrackingBatch, seedTrackedKeywordsFromGsc } from "@/lib/seo/rank-tracking";
 import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
+import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
 
 type ChiefAction = ChiefPlan["actions"][number];
 
@@ -27,6 +28,28 @@ function slugify(value: string) {
 function cleanDomain(value: string | null) {
   if (!value) return null;
   return value.replace(/^https?:\/\//, "").replace(/\/$/, "") || null;
+}
+
+function addIsoDays(isoDate: string, days: number) {
+  const date = new Date(isoDate + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeInterventionUrl(value: string, domain: string | null) {
+  try {
+    const url = value.startsWith("/")
+      ? new URL("https://" + (domain || "") + value)
+      : value.includes("://")
+        ? new URL(value)
+        : new URL("https://" + value);
+    return {
+      url: url.toString().replace(/\/$/, ""),
+      path: url.pathname || "/",
+    };
+  } catch {
+    throw new Error("Invalid intervention URL: " + value);
+  }
 }
 
 async function resolveProject(
@@ -69,6 +92,43 @@ async function resolveProject(
   });
 
   return contains.length === 1 ? contains[0].id : null;
+}
+
+async function resolveSeoIntervention(
+  supabase: SupabaseClient,
+  ownerId: string,
+  projectId: string,
+  ref: string | null,
+) {
+  if (!ref) return null;
+
+  const { data: direct } = await supabase
+    .from("seo_interventions")
+    .select("id,title,status")
+    .eq("owner_id", ownerId)
+    .eq("project_id", projectId)
+    .eq("id", ref)
+    .maybeSingle();
+  if (direct?.id) return direct;
+
+  const normalized = ref.trim().toLowerCase();
+  const { data: rows } = await supabase
+    .from("seo_interventions")
+    .select("id,title,status")
+    .eq("owner_id", ownerId)
+    .eq("project_id", projectId)
+    .order("implemented_at", { ascending: false })
+    .limit(200);
+
+  const exact = (rows || []).filter(
+    (row) => row.title.trim().toLowerCase() === normalized,
+  );
+  if (exact.length === 1) return exact[0];
+
+  const contains = (rows || []).filter((row) =>
+    row.title.trim().toLowerCase().includes(normalized),
+  );
+  return contains.length === 1 ? contains[0] : null;
 }
 
 async function resolveSalesCampaign(
@@ -589,6 +649,8 @@ export async function executeChiefActions(input: {
           "run_rank_tracking",
           "configure_opportunity_engine",
           "run_opportunity_scan",
+          "record_seo_intervention",
+          "evaluate_seo_intervention",
         ].includes(action.type) &&
         !projectId
       ) {
@@ -1307,6 +1369,226 @@ export async function executeChiefActions(input: {
             String(scan.high) +
             " high importance.",
           data: scan,
+        });
+        continue;
+      }
+
+      if (action.type === "record_seo_intervention") {
+        const title = action.intervention_title?.trim();
+        const implementedAt = action.implemented_at?.trim();
+        const interventionType = action.intervention_type || "other";
+        const urls = Array.from(
+          new Set(
+            (action.intervention_urls || [])
+              .map((item) => item.trim())
+              .filter(Boolean),
+          ),
+        ).slice(0, 100);
+        const queries = Array.from(
+          new Set(
+            (action.intervention_queries || [])
+              .map((item) => item.trim())
+              .filter(Boolean),
+          ),
+        ).slice(0, 100);
+        const scope =
+          action.intervention_scope ||
+          (urls.length || queries.length ? "targeted" : "project");
+
+        if (!title || !implementedAt) {
+          throw new Error(
+            "SEO intervention requires an explicit title and implementation date.",
+          );
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(implementedAt)) {
+          throw new Error(
+            "SEO intervention implementation date must use YYYY-MM-DD.",
+          );
+        }
+        if (scope === "targeted" && !urls.length && !queries.length) {
+          throw new Error(
+            "A targeted SEO intervention requires at least one explicit URL or query.",
+          );
+        }
+
+        const { data: project } = await supabase
+          .from("projects")
+          .select("domain")
+          .eq("id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .single();
+
+        const { data: intervention, error: interventionError } = await supabase
+          .from("seo_interventions")
+          .insert({
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            title,
+            intervention_type: interventionType,
+            implemented_at: implementedAt,
+            hypothesis: action.intervention_hypothesis?.trim() || null,
+            notes: action.intervention_notes?.trim() || null,
+            scope_mode: scope,
+            status: "monitoring",
+            gsc_lag_days: 3,
+            ga4_lag_days: 1,
+          })
+          .select("id,title")
+          .single();
+
+        if (interventionError || !intervention) {
+          throw new Error(
+            interventionError?.message || "SEO intervention could not be saved.",
+          );
+        }
+
+        try {
+          if (urls.length) {
+            const { error } = await supabase
+              .from("seo_intervention_urls")
+              .insert(
+                urls.map((value) => {
+                  const normalized = normalizeInterventionUrl(
+                    value,
+                    project?.domain || null,
+                  );
+                  return {
+                    intervention_id: intervention.id,
+                    project_id: projectId!,
+                    owner_id: input.ownerId,
+                    url: normalized.url,
+                    url_path: normalized.path,
+                  };
+                }),
+              );
+            if (error) throw new Error(error.message);
+          }
+
+          if (queries.length) {
+            const { error } = await supabase
+              .from("seo_intervention_queries")
+              .insert(
+                queries.map((query) => ({
+                  intervention_id: intervention.id,
+                  project_id: projectId!,
+                  owner_id: input.ownerId,
+                  query,
+                })),
+              );
+            if (error) throw new Error(error.message);
+          }
+
+          const { error: checkError } = await supabase
+            .from("seo_intervention_checks")
+            .insert(
+              [7, 14, 28].map((checkpointDays) => ({
+                intervention_id: intervention.id,
+                project_id: projectId!,
+                owner_id: input.ownerId,
+                checkpoint_days: checkpointDays,
+                due_date: addIsoDays(
+                  implementedAt,
+                  checkpointDays + 3,
+                ),
+                status: "pending",
+              })),
+            );
+          if (checkError) throw new Error(checkError.message);
+        } catch (childError) {
+          await supabase
+            .from("seo_interventions")
+            .delete()
+            .eq("id", intervention.id)
+            .eq("owner_id", input.ownerId);
+          throw childError;
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Recorded SEO intervention " +
+            intervention.title +
+            " with D+7, D+14 and D+28 checkpoints.",
+          data: {
+            intervention_id: intervention.id,
+            urls: urls.length,
+            queries: queries.length,
+            implemented_at: implementedAt,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "evaluate_seo_intervention") {
+        const ref =
+          action.intervention_ref?.trim() ||
+          action.intervention_title?.trim() ||
+          null;
+        const checkpointDays = action.checkpoint_days;
+
+        if (!ref || !checkpointDays) {
+          throw new Error(
+            "Intervention reference and checkpoint_days (7, 14 or 28) are required.",
+          );
+        }
+
+        const intervention = await resolveSeoIntervention(
+          supabase,
+          input.ownerId,
+          projectId!,
+          ref,
+        );
+        if (!intervention) {
+          throw new Error(
+            "SEO intervention could not be uniquely resolved from " + ref + ".",
+          );
+        }
+
+        const { data: check } = await supabase
+          .from("seo_intervention_checks")
+          .select("id")
+          .eq("intervention_id", intervention.id)
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .eq("checkpoint_days", checkpointDays)
+          .single();
+
+        if (!check) {
+          throw new Error(
+            "The requested intervention checkpoint does not exist.",
+          );
+        }
+
+        const evaluation = await evaluateInterventionCheck({
+          checkId: check.id,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            evaluation.status === "evaluated"
+              ? "Evaluated D+" +
+                checkpointDays +
+                " for " +
+                intervention.title +
+                ": " +
+                String(evaluation.resultClass || "observation") +
+                "."
+              : "D+" +
+                checkpointDays +
+                " for " +
+                intervention.title +
+                " is still waiting for sufficient warehouse coverage.",
+          data: {
+            intervention_id: intervention.id,
+            checkpoint_days: checkpointDays,
+            ...evaluation,
+          },
         });
         continue;
       }
