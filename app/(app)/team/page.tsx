@@ -103,6 +103,22 @@ export default async function TeamPage({
     );
   }
 
+  const openaiReady = Boolean(process.env.OPENAI_API_KEY);
+  const workerReady = Boolean(process.env.SUPABASE_SECRET_KEY);
+  const serpReady = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  const githubPrivateReady = Boolean(process.env.GITHUB_TOKEN);
+
+  function readinessFor(agentKey: string) {
+    if (!openaiReady) return { label: "Waiting for OpenAI", className: "teamAttention" };
+    if (agentKey === "research_content" && !serpReady) {
+      return { label: "Core ready · SERP optional", className: "teamPartial" };
+    }
+    if (agentKey === "developer" && !githubPrivateReady) {
+      return { label: "Public GitHub ready", className: "teamPartial" };
+    }
+    return { label: "Ready", className: "teamReady" };
+  }
+
   const chief = typedAgents.find((agent) => agent.agent_key === "chief_operator");
   const router = typedAgents.find((agent) => agent.agent_key === "router_orchestrator");
   const specialists = typedAgents.filter((agent) => agent.team_level === 2);
@@ -116,6 +132,7 @@ export default async function TeamPage({
   }) {
     const latest = latestRunByAgent.get(agent.agent_key);
     const state = runtimeState(latest);
+    const readiness = readinessFor(agent.agent_key);
     const scheduledCount = schedulesByAgent.get(agent.agent_key) || 0;
     const capabilities = Array.isArray(agent.capabilities)
       ? agent.capabilities.map(String)
@@ -131,7 +148,10 @@ export default async function TeamPage({
               <h3>{agent.name}</h3>
             </div>
           </div>
-          <span className={`teamRuntime ${state.className}`}>{state.label}</span>
+          <div className="teamAgentStates">
+            <span className={`teamRuntime ${state.className}`}>{state.label}</span>
+            <span className={`teamRuntime ${readiness.className}`}>{readiness.label}</span>
+          </div>
         </div>
 
         <p className="teamAgentDescription">{agent.description}</p>
@@ -189,6 +209,7 @@ export default async function TeamPage({
         <div><span className="legendDot attention" /> Needs attention</div>
         <div><strong>{schedules?.length || 0}</strong> scheduled tasks</div>
         <div><strong>{handoffs?.length || 0}</strong> open handoffs</div>
+        <div><strong>{workerReady ? "On" : "Waiting"}</strong> background worker</div>
       </section>
 
       <section className="orgChart">
