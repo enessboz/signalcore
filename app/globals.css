@@ -707,3 +707,19 @@ button, input, textarea { font: inherit; }
 @media (max-width: 680px) {
   .approvalExecutor { align-items: flex-start; flex-direction: column; }
 }
+
+.salesAutomationBox { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.salesAutomationHeader { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.salesAutomationHeader > div { display: grid; gap: 2px; }
+.salesAutomationHeader strong { font-size: 8px; }
+.salesAutomationHeader span { color: var(--muted); font-size: 7px; line-height: 1.4; }
+.salesAutomationForm { display: grid; grid-template-columns: repeat(4,minmax(90px,1fr)); gap: 7px; align-items: end; margin-top: 8px; }
+.salesAutomationForm label { display: grid; gap: 4px; font-size: 7px; font-weight: 700; }
+.salesAutomationForm input, .salesAutomationForm select { border: 1px solid var(--line); border-radius: 7px; background: white; padding: 7px; font-size: 8px; min-width: 0; }
+.salesAutomationForm .checkboxLabel { display: flex; align-items: center; gap: 5px; }
+@media (max-width: 900px) {
+  .salesAutomationForm { grid-template-columns: repeat(2,minmax(90px,1fr)); }
+}
+@media (max-width: 560px) {
+  .salesAutomationForm { grid-template-columns: 1fr; }
+}
