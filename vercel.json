@@ -1,12 +1,33 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/data-sync", "schedule": "0 1 * * *" },
-    { "path": "/api/cron/technical-crawler", "schedule": "0 2 * * *" },
-    { "path": "/api/cron/rank-tracker", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/opportunity-engine", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/interventions", "schedule": "0 5 * * *" },
-    { "path": "/api/cron/agent-scheduler", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/sales-discovery", "schedule": "0 7 * * *" }
+    {
+      "path": "/api/cron/data-sync",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/technical-crawler",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/rank-tracker",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/opportunity-engine",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/interventions",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/agent-scheduler",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/sales-discovery",
+      "schedule": "0 7 * * *"
+    }
   ]
 }
