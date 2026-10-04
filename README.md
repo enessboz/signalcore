@@ -51,3 +51,6 @@ Never expose Supabase secret/service-role keys to the browser.
 ## Hosting
 
 Vercel is connected to the GitHub repository. Public Supabase environment variables are configured in Vercel; server-only GSC credentials remain intentionally unset until OAuth setup.
+
+
+Google OAuth environment is configured in Vercel for the account-level GSC + GA4 connection flow.
