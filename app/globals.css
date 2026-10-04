@@ -485,3 +485,7 @@ button, input, textarea { font: inherit; }
 .brainEntry p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; white-space: pre-wrap; }
 .brainEntry form { margin: 0; }
 .brainEntry button { padding: 6px 8px; font-size: 8px; width: fit-content; }
+
+.teamAgentStates { display: grid; gap: 4px; justify-items: end; }
+.teamReady { background: #ecfdf3; color: #067647; }
+.teamPartial { background: #eef4ff; color: #3538cd; }
