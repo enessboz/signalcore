@@ -331,11 +331,13 @@ export default async function OpportunitiesPage({
                     href={
                       source === "ga4_warehouse"
                         ? "/projects/" + project.id + "/analytics"
-                        : source === "rank_tracker" || source === "cross_source"
-                          ? "/projects/" + project.id + "/rank-tracker"
-                          : source === "http_crawl"
-                            ? "/projects/" + project.id + "/technical"
-                            : "/projects/" + project.id + "/search-console"
+                        : source === "intervention_monitor"
+                          ? "/projects/" + project.id + "/interventions"
+                          : source === "rank_tracker" || source === "cross_source"
+                            ? "/projects/" + project.id + "/rank-tracker"
+                            : source === "http_crawl"
+                              ? "/projects/" + project.id + "/technical"
+                              : "/projects/" + project.id + "/search-console"
                     }
                     className="ghostButton"
                   >
