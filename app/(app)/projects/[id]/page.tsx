@@ -3,13 +3,22 @@ import { notFound } from "next/navigation";
 import { ProjectTypeBadge } from "@/components/project-type-badge";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectType } from "@/lib/domain/types";
-import { addBackgroundSource, selectGscProperty } from "./actions";
+import { addBackgroundSource, bindGoogleResource } from "./actions";
 
-type GscConfig = {
-  available_sites?: Array<{
-    siteUrl?: string;
-    permissionLevel?: string;
-  }>;
+type Resource = {
+  id: string;
+  connection_id: string;
+  resource_type: "gsc_property" | "ga4_property";
+  resource_id: string;
+  display_name: string | null;
+  permission_level: string | null;
+  parent_id: string | null;
+};
+
+type Binding = {
+  id: string;
+  binding_type: "gsc" | "ga4";
+  resource_id: string;
 };
 
 export default async function ProjectPage({
@@ -33,7 +42,9 @@ export default async function ProjectPage({
     { count: jobs },
     { count: chunks },
     { data: recentSources },
-    { data: gscIntegration },
+    { data: googleConnection },
+    { data: resources },
+    { data: bindings },
   ] = await Promise.all([
     supabase.from("project_sources").select("id", { count: "exact", head: true }).eq("project_id", id),
     supabase.from("project_facts").select("id", { count: "exact", head: true }).eq("project_id", id),
@@ -42,23 +53,32 @@ export default async function ProjectPage({
     supabase.from("background_chunks").select("id", { count: "exact", head: true }).eq("project_id", id),
     supabase.from("project_sources").select("id,title,source_type,created_at").eq("project_id", id).order("created_at", { ascending: false }).limit(6),
     supabase
-      .from("project_integrations")
-      .select("id,status,selected_resource,config,last_sync_at,last_success_at,last_error")
-      .eq("project_id", id)
-      .eq("provider", "gsc")
+      .from("connections")
+      .select("id,status,external_account,last_discovery_at,last_error")
+      .eq("provider", "google")
       .maybeSingle(),
+    supabase
+      .from("connection_resources")
+      .select("id,connection_id,resource_type,resource_id,display_name,permission_level,parent_id")
+      .eq("active", true)
+      .order("resource_type")
+      .order("display_name"),
+    supabase
+      .from("project_bindings")
+      .select("id,binding_type,resource_id")
+      .eq("project_id", id),
   ]);
 
+  const googleResources = (resources || []) as Resource[];
+  const projectBindings = (bindings || []) as Binding[];
+  const gscResources = googleResources.filter((resource) => resource.resource_type === "gsc_property");
+  const ga4Resources = googleResources.filter((resource) => resource.resource_type === "ga4_property");
+  const gscBinding = projectBindings.find((binding) => binding.binding_type === "gsc");
+  const ga4Binding = projectBindings.find((binding) => binding.binding_type === "ga4");
+
   const addSource = addBackgroundSource.bind(null, id);
-  const selectProperty = selectGscProperty.bind(null, id);
-  const gscConfig = (gscIntegration?.config || {}) as GscConfig;
-  const gscSites = gscConfig.available_sites || [];
-  const oauthConfigured = Boolean(
-    process.env.GOOGLE_CLIENT_ID &&
-      process.env.GOOGLE_CLIENT_SECRET &&
-      process.env.SUPABASE_SECRET_KEY &&
-      process.env.CREDENTIAL_ENCRYPTION_KEY,
-  );
+  const bindGsc = bindGoogleResource.bind(null, id, "gsc");
+  const bindGa4 = bindGoogleResource.bind(null, id, "ga4");
 
   return (
     <div className="page">
@@ -84,56 +104,80 @@ export default async function ProjectPage({
       <section className="panel integrationPanel">
         <div className="panelHeader">
           <div>
-            <h2>Google Search Console</h2>
-            <p>First-party search data. OAuth tokens remain server-only and encrypted.</p>
+            <h2>Google data sources</h2>
+            <p>Google is connected once at account level; choose the resources this project should use.</p>
           </div>
-          <span className={`connectionStatus connection-${gscIntegration?.status || "disconnected"}`}>
-            {gscIntegration?.status || "disconnected"}
+          <span className={`connectionStatus connection-${googleConnection?.status || "disconnected"}`}>
+            {googleConnection?.status || "disconnected"}
           </span>
         </div>
 
-        {gscIntegration?.status === "connected" ? (
+        {googleConnection?.status === "connected" ? (
           <div className="integrationBody">
             <div className="integrationSummary">
-              <div><strong>Available properties</strong><span>{gscSites.length}</span></div>
-              <div><strong>Selected property</strong><span>{gscIntegration.selected_resource || "Choose below"}</span></div>
-              <div><strong>Last sync</strong><span>{gscIntegration.last_success_at ? new Date(gscIntegration.last_success_at).toLocaleString("en-GB") : "Not synced yet"}</span></div>
+              <div><strong>Google account</strong><span>{googleConnection.external_account || "Connected"}</span></div>
+              <div><strong>Available GSC</strong><span>{gscResources.length}</span></div>
+              <div><strong>Available GA4</strong><span>{ga4Resources.length}</span></div>
             </div>
 
-            {gscSites.length ? (
-              <form className="inlineForm" action={selectProperty}>
+            {googleConnection.last_error ? (
+              <p className="formMessage formError">{googleConnection.last_error}</p>
+            ) : null}
+
+            <div className="bindingGrid">
+              <form className="bindingCard" action={bindGsc}>
+                <div>
+                  <strong>Google Search Console</strong>
+                  <span>Search performance, queries, pages, clicks, impressions and position.</span>
+                </div>
                 <label>
-                  Search Console property
-                  <select name="siteUrl" defaultValue={gscIntegration.selected_resource || ""} required>
-                    <option value="" disabled>Select a property</option>
-                    {gscSites.map((site) => (
-                      <option key={site.siteUrl} value={site.siteUrl}>
-                        {site.siteUrl} — {site.permissionLevel || "unknown"}
+                  Property
+                  <select name="resourceId" defaultValue={gscBinding?.resource_id || ""}>
+                    <option value="">Not connected to this project</option>
+                    {gscResources.map((resource) => (
+                      <option key={resource.id} value={resource.id}>
+                        {resource.display_name || resource.resource_id}
+                        {resource.permission_level ? ` — ${resource.permission_level}` : ""}
                       </option>
                     ))}
                   </select>
                 </label>
-                <button className="secondaryButton" type="submit">Save property</button>
+                <button className="secondaryButton" type="submit">Save GSC property</button>
               </form>
-            ) : null}
 
-            <Link className="ghostButton inlineLink" href={`/api/integrations/gsc/connect?projectId=${id}`}>
-              Reconnect Google
-            </Link>
-          </div>
-        ) : oauthConfigured ? (
-          <div className="integrationBody">
-            <p className="muted">Connect a Google account that has access to this project's Search Console property.</p>
-            <Link className="primaryButton inlineLink" href={`/api/integrations/gsc/connect?projectId=${id}`}>
-              Connect Google Search Console
+              <form className="bindingCard" action={bindGa4}>
+                <div>
+                  <strong>Google Analytics 4</strong>
+                  <span>Landing-page, session, engagement and conversion metrics.</span>
+                </div>
+                <label>
+                  Property
+                  <select name="resourceId" defaultValue={ga4Binding?.resource_id || ""}>
+                    <option value="">Not connected to this project</option>
+                    {ga4Resources.map((resource) => (
+                      <option key={resource.id} value={resource.id}>
+                        {resource.display_name || resource.resource_id} — {resource.resource_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="secondaryButton" type="submit">Save GA4 property</button>
+              </form>
+            </div>
+
+            <Link href="/settings" className="ghostButton inlineLink">
+              Manage Google account connection
             </Link>
           </div>
         ) : (
           <div className="integrationBody">
             <p className="muted">
-              OAuth code is ready. Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
-              SUPABASE_SECRET_KEY and CREDENTIAL_ENCRYPTION_KEY in the deployment environment to enable connection.
+              No account-level Google connection is available yet. Connect Google once in Settings,
+              then return here to bind the correct GSC and GA4 properties.
             </p>
+            <Link href="/settings" className="primaryButton inlineLink">
+              Open integration settings
+            </Link>
           </div>
         )}
       </section>
@@ -174,8 +218,8 @@ export default async function ProjectPage({
         <div className="foundationGrid">
           <div><strong>Boundary</strong><span>{project.project_type}</span></div>
           <div><strong>Verified facts</strong><span>{facts || 0}</span></div>
-          <div><strong>Automations</strong><span>Not configured yet</span></div>
-          <div><strong>Data health</strong><span>Project Brain storage ready</span></div>
+          <div><strong>GSC binding</strong><span>{gscBinding ? "Connected" : "Not selected"}</span></div>
+          <div><strong>GA4 binding</strong><span>{ga4Binding ? "Connected" : "Not selected"}</span></div>
         </div>
       </section>
     </div>
