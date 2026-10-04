@@ -19,6 +19,7 @@ function nextIsoDay(iso: string) {
 
 // Leave headroom below the 300s function limit so queued work can checkpoint safely.
 const SAFE_RUNTIME_MS = 240_000;
+const MAX_JOB_SLICE_MS = 75_000;
 
 export async function POST(request: NextRequest) {
   const expected = process.env.CRON_SECRET;
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest) {
 
   const { data: jobs, error: queueError } = await supabase
     .from("google_sync_queue")
-    .select("id,project_id,owner_id,source,mode,start_date,end_date,cursor_date,status,priority")
+    .select("id,project_id,owner_id,source,mode,start_date,end_date,cursor_date,status,priority,attempt_count,last_attempt_at")
     .eq("status", "queued")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true })
@@ -123,6 +124,7 @@ export async function POST(request: NextRequest) {
 
   for (const job of jobs || []) {
     if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+    const jobStartedAt = Date.now();
 
     // Backfills are bounded primarily by SAFE_RUNTIME_MS. Higher per-job caps let
     // Hobby's once-daily cron use the available runtime instead of advancing only
@@ -137,6 +139,7 @@ export async function POST(request: NextRequest) {
 
     for (let step = 0; step < maxDates; step += 1) {
       if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+      if (Date.now() - jobStartedAt >= MAX_JOB_SLICE_MS) break;
 
       try {
         const result = await processGoogleSyncJob(currentJob, supabase);
@@ -151,6 +154,8 @@ export async function POST(request: NextRequest) {
           ...currentJob,
           cursor_date: nextIsoDay(result.date),
           status: "queued",
+          attempt_count: 0,
+          last_attempt_at: new Date().toISOString(),
         };
       } catch (error) {
         failure = error instanceof Error ? error.message : "Sync failed";
@@ -168,6 +173,7 @@ export async function POST(request: NextRequest) {
       rows_processed: rowsProcessed,
       last_date: lastDate,
       error: failure,
+      elapsed_ms: Date.now() - jobStartedAt,
     });
   }
 
