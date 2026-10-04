@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
     .select("id,owner_id,project_id,created_at")
     .eq("execution_mode", "queue")
     .eq("status", "running")
+    .order("last_worker_at", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true })
     .limit(3);
 
@@ -65,6 +66,12 @@ export async function POST(request: NextRequest) {
   });
 
   if (!target) {
+    await supabase
+      .from("crawl_runs")
+      .update({ last_worker_at: new Date().toISOString() })
+      .eq("id", target.id)
+      .eq("owner_id", target.owner_id);
+
     await finishRuntimeWorkerRun({
       client: supabase,
       tracker: runtimeRun,
