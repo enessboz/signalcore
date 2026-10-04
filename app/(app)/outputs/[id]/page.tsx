@@ -1,13 +1,22 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { requestOutputApproval } from "./actions";
+
+type SearchParams = Record<string, string | string[] | undefined>;
+function scalar(value: string | string[] | undefined, fallback = "") {
+  return Array.isArray(value) ? value[0] || fallback : value || fallback;
+}
 
 export default async function OutputDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const { id } = await params;
+  const query = await searchParams;
   const supabase = await createClient();
 
   const { data: output } = await supabase
@@ -53,10 +62,20 @@ export default async function OutputDetailPage({
           <p className="muted">{new Date(output.created_at).toLocaleString("en-GB")} · {output.status}</p>
         </div>
         <div className="buttonRow">
-          <a className="primaryButton" href={`/api/outputs/${output.id}/download`}>Download .md</a>
+          {output.status === "draft" ? (
+            <form action={requestOutputApproval.bind(null, output.id)}>
+              <button className="primaryButton" type="submit">Request approval</button>
+            </form>
+          ) : (
+            <span className="readinessBadge readinessReady">{output.status}</span>
+          )}
+          <a className="secondaryButton" href={`/api/outputs/${output.id}/download`}>Download .md</a>
           <Link className="ghostButton" href="/outputs">Back</Link>
         </div>
       </header>
+
+      {scalar(query.error) ? <p className="formMessage formError pageMessage">{scalar(query.error)}</p> : null}
+      {scalar(query.message) ? <p className="formMessage formSuccess pageMessage">{scalar(query.message)}</p> : null}
 
       {slides.length ? (
         <>
