@@ -37,6 +37,7 @@ export default async function ReadinessPage() {
     { count: crawlRuns },
     { count: outputs },
     { count: projects },
+    { count: budgetLimits },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -81,6 +82,9 @@ export default async function ReadinessPage() {
       .from("projects")
       .select("id", { count: "exact", head: true })
       .eq("status", "active"),
+    supabase
+      .from("budget_limits")
+      .select("id", { count: "exact", head: true }),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -156,6 +160,16 @@ export default async function ReadinessPage() {
       detail: `${brainEntries || 0} active organization-wide context entries.`,
       actionHref: "/brain",
       actionLabel: "Global Brain",
+    },
+    {
+      label: "Cost guardrails",
+      ready: Boolean(budgetLimits),
+      optional: true,
+      detail: budgetLimits
+        ? `${budgetLimits} project/category monthly limits configured.`
+        : "Optional: add AI / SERP / browser monthly hard-stop budgets before stress testing.",
+      actionHref: "/costs",
+      actionLabel: "Costs & Budgets",
     },
     {
       label: "Approval gate",
