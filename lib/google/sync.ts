@@ -49,7 +49,7 @@ async function allGscRows(input: {
   supabase: SupabaseClient;
   siteUrl: string;
   date: string;
-  dimension: "page" | "query";
+  dimensions: Array<"page" | "query">;
 }) {
   const rows: GscRow[] = [];
   let startRow = 0;
@@ -60,7 +60,7 @@ async function allGscRows(input: {
         siteUrl: input.siteUrl,
         startDate: input.date,
         endDate: input.date,
-        dimensions: [input.dimension],
+        dimensions: input.dimensions,
         searchType: "web",
         dataState: "final",
         rowLimit: 25000,
@@ -90,18 +90,24 @@ export async function syncGscDate(input: {
     input.supabase,
   );
 
-  const [pageRows, queryRows] = await Promise.all([
+  const [pageRows, queryRows, queryPageRows] = await Promise.all([
     allGscRows({
       supabase: input.supabase,
       siteUrl: resource.resource_id,
       date: input.date,
-      dimension: "page",
+      dimensions: ["page"],
     }),
     allGscRows({
       supabase: input.supabase,
       siteUrl: resource.resource_id,
       date: input.date,
-      dimension: "query",
+      dimensions: ["query"],
+    }),
+    allGscRows({
+      supabase: input.supabase,
+      siteUrl: resource.resource_id,
+      date: input.date,
+      dimensions: ["query", "page"],
     }),
   ]);
 
@@ -145,10 +151,32 @@ export async function syncGscDate(input: {
     "project_id,date,search_type,query",
   );
 
+  await upsertChunks(
+    input.supabase,
+    "gsc_query_page_daily",
+    queryPageRows
+      .filter((row) => row.keys?.[0] && row.keys?.[1])
+      .map((row) => ({
+        project_id: input.projectId,
+        owner_id: input.ownerId,
+        date: input.date,
+        search_type: "web",
+        query: row.keys![0],
+        page: row.keys![1],
+        clicks: Number(row.clicks || 0),
+        impressions: Number(row.impressions || 0),
+        ctr: Number(row.ctr || 0),
+        position: Number(row.position || 0),
+        updated_at: new Date().toISOString(),
+      })),
+    "project_id,date,search_type,query,page",
+  );
+
   return {
     pageRows: pageRows.length,
     queryRows: queryRows.length,
-    totalRows: pageRows.length + queryRows.length,
+    queryPageRows: queryPageRows.length,
+    totalRows: pageRows.length + queryRows.length + queryPageRows.length,
   };
 }
 
@@ -279,14 +307,9 @@ async function updateSyncState(input: {
   supabase: SupabaseClient;
   job: SyncJob;
   date: string;
-  rows: number;
+  datasetRows: Record<string, number>;
 }) {
-  const datasets =
-    input.job.source === "gsc"
-      ? ["page_daily", "query_daily"]
-      : ["landing_page_daily", "event_daily"];
-
-  for (const dataset of datasets) {
+  for (const [dataset, rows] of Object.entries(input.datasetRows)) {
     const { error } = await input.supabase.from("google_sync_states").upsert(
       {
         project_id: input.job.project_id,
@@ -297,7 +320,7 @@ async function updateSyncState(input: {
         last_complete_date: input.date,
         last_attempt_at: new Date().toISOString(),
         last_success_at: new Date().toISOString(),
-        rows_total: input.rows,
+        rows_total: rows,
         last_error: null,
         updated_at: new Date().toISOString(),
       },
@@ -354,7 +377,17 @@ export async function processGoogleSyncJob(
       supabase,
       job,
       date,
-      rows: result.totalRows,
+      datasetRows:
+        job.source === "gsc"
+          ? {
+              page_daily: result.pageRows,
+              query_daily: result.queryRows,
+              query_page_daily: result.queryPageRows,
+            }
+          : {
+              landing_page_daily: result.landingRows,
+              event_daily: result.eventRows,
+            },
     });
 
     const nextDate = addDays(date, 1);
@@ -389,7 +422,7 @@ export async function processGoogleSyncJob(
 
     const datasets =
       job.source === "gsc"
-        ? ["page_daily", "query_daily"]
+        ? ["page_daily", "query_daily", "query_page_daily"]
         : ["landing_page_daily", "event_daily"];
 
     for (const dataset of datasets) {
