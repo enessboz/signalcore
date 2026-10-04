@@ -1,4 +1,5 @@
 import { executeAgentTask } from "@/lib/agents/runtime";
+import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
 import type { ChiefPlan } from "@/lib/command/chief";
 import { createClient } from "@/lib/supabase/server";
 
@@ -163,14 +164,85 @@ export async function executeChiefActions(input: {
       );
 
       if (
-        ["delegate_agent", "create_ga4_funnel", "schedule_agent_task", "request_report"].includes(
-          action.type,
-        ) &&
+        [
+          "delegate_agent",
+          "create_ga4_funnel",
+          "schedule_agent_task",
+          "request_report",
+          "run_technical_audit",
+          "run_prospect_audit",
+        ].includes(action.type) &&
         !projectId
       ) {
         throw new Error(
           `Project could not be resolved from "${action.project_ref || "empty reference"}".`,
         );
+      }
+
+      if (action.type === "run_technical_audit") {
+        const crawl = await runProjectCrawl({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          maxUrls: Math.min(Math.max(action.max_urls || 100, 1), 500),
+          crawlType: "http",
+        });
+
+        const task =
+          action.task?.trim() ||
+          "Review the latest deterministic HTTP crawl evidence, prioritize the technical SEO issues, explain why they matter, and recommend validation steps before implementation.";
+
+        const runId = await executeAgentTask({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          selectedAgentKey: "technical_seo",
+          userRequest: task,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          targetAgentKey: "technical_seo",
+          summary:
+            "Technical audit completed: " +
+            String(crawl.summary.pages_crawled || 0) +
+            " pages crawled and handed to Technical SEO Agent.",
+          data: { crawl_run_id: crawl.runId, agent_run_id: runId, crawl_summary: crawl.summary },
+        });
+        continue;
+      }
+
+      if (action.type === "run_prospect_audit") {
+        const crawl = await runProjectCrawl({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          maxUrls: Math.min(Math.max(action.max_urls || 50, 1), 150),
+          crawlType: "prospect_audit",
+        });
+
+        const task =
+          action.task?.trim() ||
+          "Review the latest public crawl evidence for this Lead Prospect. Select only saleable, evidence-backed findings, explain the likely business significance, and identify what should go into a sales narrative. Do not claim access to private analytics or internal company information.";
+
+        const runId = await executeAgentTask({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          selectedAgentKey: "sales_lead",
+          userRequest: task,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          targetAgentKey: "sales_lead",
+          summary:
+            "Prospect audit completed: " +
+            String(crawl.summary.pages_crawled || 0) +
+            " public pages crawled and handed to Sales Lead Agent.",
+          data: { crawl_run_id: crawl.runId, agent_run_id: runId, crawl_summary: crawl.summary },
+        });
+        continue;
       }
 
       if (action.type === "delegate_agent") {
