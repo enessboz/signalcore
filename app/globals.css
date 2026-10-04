@@ -114,3 +114,10 @@ button, input, textarea { font: inherit; }
 @media (max-width: 760px) {
   .resourceColumns, .bindingGrid { grid-template-columns: 1fr; }
 }
+
+.setupChecklist { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.setupChecklist > div { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--surface-2); display: grid; gap: 5px; }
+.setupChecklist strong { font-size: 11px; }
+.setupChecklist span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.setupChecklist code { display: block; overflow-wrap: anywhere; font-size: 9px; background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 8px; }
+@media (max-width: 760px) { .setupChecklist { grid-template-columns: 1fr; } }
