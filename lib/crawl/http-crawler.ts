@@ -194,10 +194,25 @@ function extractLinks(html: string, base: URL) {
   const tags = html.match(/<a\b[^>]*>/gi) || [];
   const internal = new Set<string>();
   const external = new Set<string>();
+  const emails = new Set<string>();
+  const phones = new Set<string>();
 
   for (const tag of tags) {
     const href = attr(tag, "href");
-    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) continue;
+    if (!href || href.startsWith("#")) continue;
+
+    if (href.toLowerCase().startsWith("mailto:")) {
+      const email = href.slice(7).split("?")[0]?.trim().toLowerCase();
+      if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) emails.add(email);
+      continue;
+    }
+
+    if (href.toLowerCase().startsWith("tel:")) {
+      const phone = href.slice(4).split("?")[0]?.trim();
+      if (phone) phones.add(phone);
+      continue;
+    }
+
     try {
       const url = new URL(href, base);
       if (!["http:", "https:"].includes(url.protocol)) continue;
@@ -209,7 +224,12 @@ function extractLinks(html: string, base: URL) {
     }
   }
 
-  return { internal: [...internal], external: [...external] };
+  return {
+    internal: [...internal],
+    external: [...external],
+    emails: [...emails],
+    phones: [...phones],
+  };
 }
 
 function imageStats(html: string) {
@@ -317,6 +337,8 @@ export async function crawlPage(rawUrl: string, expectedOrigin: string): Promise
       metadata: {
         internal_links_sample: links.internal.slice(0, 25),
         external_links_sample: links.external.slice(0, 10),
+        email_sample: links.emails.slice(0, 10),
+        phone_sample: links.phones.slice(0, 10),
       },
     };
   } catch (error) {
