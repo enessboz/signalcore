@@ -66,12 +66,6 @@ export async function POST(request: NextRequest) {
   });
 
   if (!target) {
-    await supabase
-      .from("crawl_runs")
-      .update({ last_worker_at: new Date().toISOString() })
-      .eq("id", target.id)
-      .eq("owner_id", target.owner_id);
-
     await finishRuntimeWorkerRun({
       client: supabase,
       tracker: runtimeRun,
@@ -157,6 +151,12 @@ export async function POST(request: NextRequest) {
         .eq("last_crawl_run_id", target.id)
         .eq("owner_id", target.owner_id);
     }
+
+    await supabase
+      .from("crawl_runs")
+      .update({ last_worker_at: new Date().toISOString() })
+      .eq("id", target.id)
+      .eq("owner_id", target.owner_id);
 
     await finishRuntimeWorkerRun({
       client: supabase,
