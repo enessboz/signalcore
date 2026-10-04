@@ -56,6 +56,10 @@ export type AgentProjectContext = {
     access_mode: string;
     status: string;
   }>;
+  warehouse_summary: {
+    gsc: Record<string, unknown> | null;
+    ga4: Record<string, unknown> | null;
+  };
   latest_crawl: null | {
     id: string;
     crawl_type: string;
@@ -121,6 +125,8 @@ export async function buildAgentProjectContext(
     { data: latestCrawl },
     { data: repositories },
     { data: serpEvidence },
+    { data: gscSummary },
+    { data: ga4Summary },
   ] = await Promise.all([
     supabase
       .from("global_brain_entries")
@@ -175,6 +181,14 @@ export async function buildAgentProjectContext(
       .eq("status", "succeeded")
       .order("checked_at", { ascending: false })
       .limit(20),
+    supabase.rpc("get_gsc_agent_summary", {
+      p_project_id: projectId,
+      p_days: 28,
+    }),
+    supabase.rpc("get_ga4_agent_summary", {
+      p_project_id: projectId,
+      p_days: 28,
+    }),
   ]);
 
   let crawlPages: Array<{
@@ -240,6 +254,10 @@ export async function buildAgentProjectContext(
       result: (item.result || {}) as Record<string, unknown>,
     })),
     repositories: repositories || [],
+    warehouse_summary: {
+      gsc: gscSummary ? (gscSummary as Record<string, unknown>) : null,
+      ga4: ga4Summary ? (ga4Summary as Record<string, unknown>) : null,
+    },
     latest_crawl: latestCrawl
       ? {
           id: latestCrawl.id,
@@ -271,6 +289,7 @@ export function contextToPrompt(context: AgentProjectContext) {
     connected_resources: context.bindings,
     repository_bindings: context.repositories,
     latest_serp_evidence: context.serp_evidence,
+    warehouse_summary_28d: context.warehouse_summary,
     latest_crawl: context.latest_crawl,
   };
 
