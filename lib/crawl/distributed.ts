@@ -952,6 +952,7 @@ async function finalizeQueuedCrawl(
 export async function processQueuedCrawlBatch(input: {
   client: SupabaseClient;
   runId: string;
+  deadlineAt?: number;
 }) {
   const { data: runData, error: runError } = await input.client
     .from("crawl_runs")
@@ -1046,7 +1047,29 @@ export async function processQueuedCrawlBatch(input: {
     .eq("crawl_run_id", run.id);
   let knownQueueCount = Number(queueCountInitial || 0);
 
-  for (const item of batch) {
+  for (let itemIndex = 0; itemIndex < batch.length; itemIndex += 1) {
+    const item = batch[itemIndex]!;
+    const safetyMs = Math.max(delayMs + 15_000, 20_000);
+    if (input.deadlineAt && Date.now() + safetyMs >= input.deadlineAt) {
+      const remainingIds = batch.slice(itemIndex).map((row) => row.id);
+      if (remainingIds.length) {
+        await input.client
+          .from("crawl_url_queue")
+          .update({
+            status: "queued",
+            claim_token: null,
+            claimed_at: null,
+            available_at: new Date().toISOString(),
+            last_error: "Released before worker runtime deadline.",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("crawl_run_id", run.id)
+          .eq("claim_token", claimToken)
+          .in("id", remainingIds);
+      }
+      break;
+    }
+
     processed += 1;
 
     const allowed = !respectRobots || isRobotsAllowed(robots, item.url);
