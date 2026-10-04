@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
 import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForLead } from "@/lib/sales/prospect";
+import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
 
 type ChiefAction = ChiefPlan["actions"][number];
 
@@ -577,6 +578,7 @@ export async function executeChiefActions(input: {
           "add_project_background",
           "assign_output_profile",
           "set_budget_limit",
+          "convert_project_to_client",
         ].includes(action.type) &&
         !projectId
       ) {
@@ -827,6 +829,25 @@ export async function executeChiefActions(input: {
           projectId,
           summary: `${source.toUpperCase()} ${days}-day backfill queued.`,
           data: { source, days, job_id: jobId, start_date: startDate, end_date: endDate },
+        });
+        continue;
+      }
+
+      if (action.type === "convert_project_to_client") {
+        const converted = await convertLeadProspectProjectToClient({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: converted.changed
+            ? "Lead Prospect converted to Client workspace."
+            : "Project is already a Client workspace.",
+          data: { project_id: projectId, changed: converted.changed },
         });
         continue;
       }
