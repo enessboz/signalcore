@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { createClient } from "@/lib/supabase/server";
 
 type AgentDefinitionRow = {
@@ -158,6 +159,7 @@ export default async function TeamPage() {
 
   return (
     <div className="page teamPage">
+      <AutoRefresh intervalMs={12000} />
       <header className="pageHeader">
         <div>
           <p className="eyebrow">AI organization</p>
