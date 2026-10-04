@@ -85,9 +85,12 @@ export async function runGscOpportunityScan(projectId: string) {
       client: supabase,
     });
 
-    if (!result.gscAvailable && !result.gscQueryPageAvailable) {
+    if (!result.gscReady && !result.gscQueryPageReady) {
+      const coverage = result.coverage?.gsc || {};
       throw new Error(
-        "No synced GSC warehouse data is available yet. Complete a GSC backfill or incremental sync first.",
+        "GSC warehouse coverage is not ready yet. Current query coverage: " +
+          String(coverage.current_days || 0) +
+          " days; at least 14 days are required for current-period opportunities and 21+21 days for period comparisons.",
       );
     }
 
