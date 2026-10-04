@@ -38,6 +38,23 @@ export async function startRuntimeWorkerRun(input: {
 
   if (!ownerIds.length) return tracker;
 
+  const staleCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+  const { error: recoveryError } = await input.client
+    .from("runtime_worker_runs")
+    .update({
+      status: "failed",
+      error: "Recovered stale runtime worker record after interrupted invocation.",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("worker_key", input.workerKey)
+    .eq("status", "running")
+    .lt("started_at", staleCutoff)
+    .in("owner_id", ownerIds);
+
+  if (recoveryError) {
+    throw new Error("Stale runtime worker recovery failed: " + recoveryError.message);
+  }
+
   const { error } = await input.client.from("runtime_worker_runs").insert(
     ownerIds.map((ownerId) => ({
       batch_id: tracker.batchId,
