@@ -3,11 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
+import { startQueuedCrawl } from "@/lib/crawl/distributed";
 import { createClient } from "@/lib/supabase/server";
 
 export async function runTechnicalCrawl(projectId: string, formData: FormData) {
   const raw = Number(String(formData.get("maxUrls") || "100"));
-  const maxUrls = [25, 50, 100, 200, 500].includes(raw) ? raw : 100;
+  const allowed = [25, 50, 100, 200, 500, 1000, 5000, 10000];
+  const maxUrls = allowed.includes(raw) ? raw : 100;
+  const jsRenderModeRaw = String(formData.get("jsRenderMode") || "off");
+  const jsRenderMode =
+    jsRenderModeRaw === "auto" || jsRenderModeRaw === "always"
+      ? jsRenderModeRaw
+      : "off";
+  const pagespeedEnabled = formData.get("pagespeedEnabled") === "on";
 
   const supabase = await createClient();
   const { data: claimsData } = await supabase.auth.getClaims();
@@ -15,11 +23,34 @@ export async function runTechnicalCrawl(projectId: string, formData: FormData) {
   if (!ownerId) redirect("/login");
 
   try {
+    if (maxUrls > 500) {
+      const result = await startQueuedCrawl({
+        client: supabase,
+        ownerId,
+        projectId,
+        maxUrls,
+        crawlType: "http",
+        batchSize: 50,
+        minDelayMs: 250,
+        respectRobots: true,
+        jsRenderMode,
+        pagespeedEnabled,
+        pagespeedSampleSize: pagespeedEnabled ? 20 : 0,
+      });
+
+      redirect(
+        `/projects/${projectId}/technical?run=${result.runId}&message=${encodeURIComponent(
+          `Distributed crawl queued: ${maxUrls.toLocaleString("en-US")} URL ceiling`,
+        )}`,
+      );
+    }
+
     const result = await runProjectCrawl({
       ownerId,
       projectId,
       maxUrls,
       crawlType: "http",
+      jsRenderMode,
     });
 
     redirect(
@@ -49,9 +80,28 @@ export async function saveTechnicalCrawlSchedule(
   const name = textValue(formData, "name") || "Technical Crawl";
   const crawlType = textValue(formData, "crawlType") === "delta" ? "delta" : "http";
   const rawMaxUrls = Number(textValue(formData, "maxUrls") || "100");
-  const maxUrls = [25, 50, 100, 200, 500].includes(rawMaxUrls)
+  const allowedMaxUrls = [25, 50, 100, 200, 500, 1000, 5000, 10000, 25000, 50000];
+  const maxUrls = allowedMaxUrls.includes(rawMaxUrls)
     ? rawMaxUrls
     : 100;
+  const batchSize = Math.min(
+    Math.max(Number(textValue(formData, "batchSize") || "50"), 5),
+    100,
+  );
+  const minDelayMs = Math.min(
+    Math.max(Number(textValue(formData, "minDelayMs") || "250"), 0),
+    10000,
+  );
+  const jsRenderModeRaw = textValue(formData, "jsRenderMode") || "off";
+  const jsRenderMode =
+    jsRenderModeRaw === "auto" || jsRenderModeRaw === "always"
+      ? jsRenderModeRaw
+      : "off";
+  const pagespeedEnabled = formData.get("pagespeedEnabled") === "on";
+  const pagespeedSampleSize = Math.min(
+    Math.max(Number(textValue(formData, "pagespeedSampleSize") || "20"), 0),
+    100,
+  );
   const scheduleKind = textValue(formData, "scheduleKind") || "weekly";
   const timeLocal = textValue(formData, "timeLocal") || "10:00";
   const timezone = textValue(formData, "timezone") || "Europe/Istanbul";
@@ -97,6 +147,12 @@ export async function saveTechnicalCrawlSchedule(
         schedule_kind: scheduleKind,
         schedule_config: scheduleConfig,
         timezone,
+        batch_size: batchSize,
+        min_delay_ms: minDelayMs,
+        respect_robots: true,
+        js_render_mode: jsRenderMode,
+        pagespeed_enabled: pagespeedEnabled,
+        pagespeed_sample_size: pagespeedSampleSize,
         status: "active",
         last_status: "idle",
         last_error: null,
