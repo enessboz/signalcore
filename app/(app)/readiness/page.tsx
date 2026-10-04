@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 type ReadinessItem = {
   label: string;
@@ -45,6 +44,15 @@ export default async function ReadinessPage() {
     { count: activeOpportunityProjects },
     { count: monitoringInterventions },
     { count: pendingInterventionChecks },
+    { data: projectBindings },
+    { count: queuedSyncJobs },
+    { count: runningSyncJobs },
+    { count: failedSyncJobs },
+    { count: failedSyncDates },
+    { count: recentWorkerRuns },
+    { count: recentWorkerFailures },
+    { count: staleRuntimeRuns },
+    { data: passedUatRuns },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -117,6 +125,44 @@ export default async function ReadinessPage() {
       .from("seo_intervention_checks")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
+    supabase
+      .from("project_bindings")
+      .select("project_id,binding_type,auto_sync_enabled")
+      .in("binding_type", ["gsc", "ga4"]),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "queued"),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "running"),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed"),
+    supabase
+      .from("google_sync_date_log")
+      .select("project_id", { count: "exact", head: true })
+      .eq("status", "failed"),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .gte("started_at", new Date(Date.now() - 24 * 60 * 60_000).toISOString()),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed")
+      .gte("started_at", new Date(Date.now() - 24 * 60 * 60_000).toISOString()),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "running")
+      .lt("started_at", new Date(Date.now() - 15 * 60_000).toISOString()),
+    supabase
+      .from("agent_uat_runs")
+      .select("scenario_key,expected_agent_key,execution_mode,status")
+      .eq("status", "passed"),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -133,60 +179,34 @@ export default async function ReadinessPage() {
   const rankWorkerReady = deterministicWorkerReady && dataForSeoReady;
   const opportunityWorkerReady = deterministicWorkerReady;
   const interventionWorkerReady = deterministicWorkerReady;
-  let runtimeHealth = {
-    activeLeases: 0,
-    queuedSyncJobs: 0,
-    runningSyncJobs: 0,
-    failedSyncJobs: 0,
-    staleGoogleSync: 0,
-    staleCrawls: 0,
-    staleAgentTasks: 0,
-    staleRankRuns: 0,
+  const runtimeHealth = {
+    queuedSyncJobs: queuedSyncJobs || 0,
+    runningSyncJobs: runningSyncJobs || 0,
+    failedSyncJobs: failedSyncJobs || 0,
+    failedSyncDates: failedSyncDates || 0,
+    recentWorkerRuns: recentWorkerRuns || 0,
+    recentWorkerFailures: recentWorkerFailures || 0,
+    staleRuntimeRuns: staleRuntimeRuns || 0,
   };
 
-  if (supabaseWorkerReady) {
-    const admin = createAdminClient();
-    const nowIso = new Date().toISOString();
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60_000).toISOString();
+  const staleWorkerCount = runtimeHealth.staleRuntimeRuns;
 
-    const [
-      { count: activeLeases },
-      { count: queuedSyncJobs },
-      { count: runningSyncJobs },
-      { count: failedSyncJobs },
-      { count: staleGoogleSync },
-      { count: staleCrawls },
-      { count: staleAgentTasks },
-      { count: staleRankRuns },
-    ] = await Promise.all([
-      admin.from("runtime_leases").select("lease_key", { count: "exact", head: true }).gt("lease_until", nowIso),
-      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "queued"),
-      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "running"),
-      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "failed"),
-      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "running").lt("started_at", tenMinutesAgo),
-      admin.from("technical_crawl_schedules").select("id", { count: "exact", head: true }).eq("status", "running").lt("updated_at", fifteenMinutesAgo),
-      admin.from("scheduled_tasks").select("id", { count: "exact", head: true }).eq("status", "running").lt("updated_at", fifteenMinutesAgo),
-      admin.from("rank_tracking_runs").select("id", { count: "exact", head: true }).eq("status", "running").lt("started_at", fifteenMinutesAgo),
-    ]);
-
-    runtimeHealth = {
-      activeLeases: activeLeases || 0,
-      queuedSyncJobs: queuedSyncJobs || 0,
-      runningSyncJobs: runningSyncJobs || 0,
-      failedSyncJobs: failedSyncJobs || 0,
-      staleGoogleSync: staleGoogleSync || 0,
-      staleCrawls: staleCrawls || 0,
-      staleAgentTasks: staleAgentTasks || 0,
-      staleRankRuns: staleRankRuns || 0,
-    };
-  }
-
-  const staleWorkerCount =
-    runtimeHealth.staleGoogleSync +
-    runtimeHealth.staleCrawls +
-    runtimeHealth.staleAgentTasks +
-    runtimeHealth.staleRankRuns;
+  const boundGoogleProjects = new Set(
+    (projectBindings || []).map((binding) => binding.project_id),
+  ).size;
+  const directUatAgents = new Set(
+    (passedUatRuns || [])
+      .filter((run) => run.execution_mode === "direct")
+      .map((run) => run.expected_agent_key),
+  );
+  const routerUatPasses = (passedUatRuns || []).filter(
+    (run) => run.execution_mode === "router",
+  ).length;
+  const uatSmokeReady = directUatAgents.size >= 7 && routerUatPasses >= 3;
+  const dataHealthReady =
+    runtimeHealth.failedSyncJobs === 0 &&
+    runtimeHealth.failedSyncDates === 0 &&
+    runtimeHealth.staleRuntimeRuns === 0;
 
   const totalScheduled =
     (activeSchedules || 0) +
@@ -235,13 +255,42 @@ export default async function ReadinessPage() {
       actionLabel: "Automations",
     },
     {
-      label: "Runtime concurrency guard",
-      ready: deterministicWorkerReady && staleWorkerCount === 0,
+      label: "Runtime operations & recovery",
+      ready:
+        deterministicWorkerReady &&
+        staleWorkerCount === 0 &&
+        runtimeHealth.recentWorkerFailures === 0,
       detail: deterministicWorkerReady
-        ? `${runtimeHealth.activeLeases} active worker lease(s) · ${staleWorkerCount} stale worker state(s). Expired leases and interrupted jobs recover automatically.`
-        : "Worker lease and stale-run recovery activate with the server worker credential.",
-      actionHref: "/automations",
-      actionLabel: "Runtime health",
+        ? `${runtimeHealth.recentWorkerRuns} owner-scoped worker run(s) in 24h · ${runtimeHealth.recentWorkerFailures} failed · ${staleWorkerCount} stale. Interrupted worker records recover automatically.`
+        : "Operations telemetry and stale-run recovery activate with the server worker credential.",
+      actionHref: "/operations",
+      actionLabel: "Operations",
+    },
+    {
+      label: "First-party data health",
+      ready: boundGoogleProjects === 0 ? google?.status === "connected" : dataHealthReady,
+      detail:
+        boundGoogleProjects === 0
+          ? "No project-level GSC/GA4 bindings are active yet."
+          : `${boundGoogleProjects} project(s) bound · ${runtimeHealth.failedSyncJobs} failed sync job(s) · ${runtimeHealth.failedSyncDates} failed date(s).`,
+      actionHref: "/projects",
+      actionLabel: "Projects",
+    },
+    {
+      label: "Agent UAT smoke gate",
+      ready: uatSmokeReady,
+      detail: `${directUatAgents.size}/7 specialist agents have a passing direct scenario · ${routerUatPasses}/3 minimum router scenarios passed.`,
+      actionHref: "/agent-uat",
+      actionLabel: "Agent UAT",
+    },
+    {
+      label: "Production cost guardrail",
+      ready: Boolean(budgetLimits),
+      detail: budgetLimits
+        ? `${budgetLimits} project/category monthly budget limit(s) configured with deterministic soft/hard budget findings.`
+        : "Configure at least one AI/SERP/browser monthly budget before production model or paid-provider testing.",
+      actionHref: "/costs",
+      actionLabel: "Costs & Budgets",
     },
   ];
 
@@ -320,14 +369,11 @@ export default async function ReadinessPage() {
       actionLabel: "Automations",
     },
     {
-      label: "Cost guardrails",
-      ready: Boolean(budgetLimits),
-      optional: true,
-      detail: budgetLimits
-        ? `${budgetLimits} project/category monthly limits configured.`
-        : "Optional: add AI / SERP / browser monthly hard-stop budgets before stress testing.",
-      actionHref: "/costs",
-      actionLabel: "Costs & Budgets",
+      label: "Native deliverables",
+      ready: true,
+      detail: `${outputs || 0} generated output(s) stored. Documents can render as DOCX and presentations as PPTX without another model call.`,
+      actionHref: "/outputs",
+      actionLabel: "Outputs",
     },
     {
       label: "Approval gate",
@@ -410,9 +456,9 @@ export default async function ReadinessPage() {
           <small>{runtimeHealth.queuedSyncJobs} queued · {runtimeHealth.runningSyncJobs} running · {runtimeHealth.failedSyncJobs} failed</small>
         </article>
         <article className="healthCard">
-          <span>Runtime leases</span>
-          <strong>{runtimeHealth.activeLeases}</strong>
-          <small>Concurrent worker protection</small>
+          <span>Worker operations</span>
+          <strong>{runtimeHealth.recentWorkerRuns}</strong>
+          <small>Owner-scoped runs · last 24h</small>
         </article>
         <article className="healthCard">
           <span>Stale workers</span>
@@ -475,9 +521,12 @@ export default async function ReadinessPage() {
         <div>
           <h2>Activation order</h2>
           <p>
-            1. Add OPENAI_API_KEY. 2. Add SUPABASE_SECRET_KEY. 3. Verify CRON_SECRET.
-            4. Re-enable the required Supabase Cron workers. 5. Seed Global Brain rules.
-            6. Run controlled project tests before enabling any external-impact executor.
+            1. Connect the final Vercel production account and copy the verified environment variables.
+            2. Confirm Vercel Cron can invoke all protected worker routes.
+            3. Run the Agent UAT smoke gate on a controlled project.
+            4. Confirm Operations and project Data Health stay clean through at least one worker cycle.
+            5. Enable Supabase leaked-password protection in the Auth dashboard.
+            6. Only then enable production external-impact executors behind the approval gate.
           </p>
         </div>
         <div className="buttonRow">
