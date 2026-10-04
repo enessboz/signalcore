@@ -629,7 +629,11 @@ async function fetchText(url: string, maxBytes = 5_000_000) {
   };
 }
 
-export async function discoverSitemapUrls(seed: string, maxUrls: number) {
+export async function discoverSitemapUrls(
+  seed: string,
+  maxUrls: number,
+  options: { skipUrls?: number } = {},
+) {
   const seedUrl = await assertPublicUrl(seed);
   const origin = seedUrl.origin;
   const sitemapCandidates = new Set<string>();
@@ -650,6 +654,8 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
   const discovered = new Set<string>();
   const sitemapQueue = [...sitemapCandidates];
   const seenSitemaps = new Set<string>();
+  const skipUrls = Math.max(Number(options.skipUrls || 0), 0);
+  let validUrlsSeen = 0;
 
   while (sitemapQueue.length && seenSitemaps.size < 50 && discovered.size < maxUrls) {
     const sitemapUrl = sitemapQueue.shift()!;
@@ -678,6 +684,8 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
             const parsed = new URL(loc);
             if (parsed.origin !== origin) continue;
             parsed.hash = "";
+            validUrlsSeen += 1;
+            if (validUrlsSeen <= skipUrls) continue;
             discovered.add(parsed.toString());
           } catch {
             // Ignore invalid URLs.
@@ -691,11 +699,19 @@ export async function discoverSitemapUrls(seed: string, maxUrls: number) {
 
   const home = new URL("/", origin).toString();
   const sitemapUrls = Array.from(discovered).slice(0, maxUrls);
+  const scanExhausted =
+    discovered.size < maxUrls &&
+    sitemapQueue.length === 0;
+
   return {
     origin,
     urls: [home, ...sitemapUrls.filter((url) => url !== home)].slice(0, maxUrls),
     sitemapUrls,
     sitemapSources: [...seenSitemaps],
     sitemapCount: seenSitemaps.size,
+    sitemapOffset: skipUrls,
+    nextSitemapOffset: skipUrls + sitemapUrls.length,
+    validUrlsSeen,
+    scanExhausted,
   };
 }
