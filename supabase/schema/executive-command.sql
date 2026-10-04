@@ -58,6 +58,7 @@ create table if not exists public.scheduled_tasks (
   target_agent_key text not null references public.agent_definitions(agent_key),
   schedule_kind text not null check (schedule_kind in ('once','daily','weekly','monthly')),
   schedule_config jsonb not null default '{}'::jsonb,
+  post_run_config jsonb not null default '{}'::jsonb,
   timezone text not null default 'Europe/Istanbul',
   status text not null default 'active'
     check (status in ('active','paused','running','completed','failed','cancelled')),
@@ -84,6 +85,7 @@ create index if not exists scheduled_tasks_owner_status_idx on public.scheduled_
 create index if not exists scheduled_tasks_project_owner_fk_idx on public.scheduled_tasks(project_id, owner_id);
 create index if not exists scheduled_tasks_target_agent_idx on public.scheduled_tasks(target_agent_key);
 create index if not exists scheduled_tasks_last_run_idx on public.scheduled_tasks(last_run_id);
+create index if not exists scheduled_tasks_post_run_gin_idx on public.scheduled_tasks using gin(post_run_config);
 
 grant select, insert, update, delete on public.command_threads to authenticated;
 grant select, insert, update, delete on public.command_messages to authenticated;
