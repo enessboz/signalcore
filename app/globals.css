@@ -474,3 +474,14 @@ button, input, textarea { font: inherit; }
 .outputDocument pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 11px; line-height: 1.7; color: #344054; }
 @media (max-width: 980px) { .outputGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 640px) { .outputGrid { grid-template-columns: 1fr; } }
+
+.brainEntryList { display: grid; }
+.brainEntry { border-top: 1px solid var(--line); padding: 11px 0; display: grid; gap: 7px; }
+.brainEntry.inactive { opacity: .55; }
+.brainEntryTop { display: flex; justify-content: space-between; gap: 12px; }
+.brainEntryTop > div { display: grid; gap: 2px; }
+.brainEntryTop span, .brainEntryTop small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.brainEntryTop strong { font-size: 10px; }
+.brainEntry p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; white-space: pre-wrap; }
+.brainEntry form { margin: 0; }
+.brainEntry button { padding: 6px 8px; font-size: 8px; width: fit-content; }
