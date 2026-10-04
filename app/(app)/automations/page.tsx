@@ -43,6 +43,8 @@ export default async function AutomationsPage({
     { data: technicalSchedules },
     { data: rankSettings },
     { data: opportunitySettings },
+    { data: interventionChecks },
+    { count: monitoringInterventions },
   ] = await Promise.all([
     supabase.from("projects").select("id,name,domain").order("name"),
     supabase
@@ -106,6 +108,16 @@ export default async function AutomationsPage({
       .select("project_id,enabled,scan_gsc,scan_ga4,scan_rank,cadence,last_run_at,last_data_date,last_status,last_error,consecutive_failures")
       .eq("enabled", true)
       .order("updated_at", { ascending: false }),
+    supabase
+      .from("seo_intervention_checks")
+      .select("id,project_id,intervention_id,checkpoint_days,due_date,status,result_class,last_attempt_at,last_error")
+      .eq("status", "pending")
+      .order("due_date", { ascending: true })
+      .limit(50),
+    supabase
+      .from("seo_interventions")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "monitoring"),
   ]);
 
   const projectMap = new Map((projects || []).map((project) => [project.id, project]));
@@ -133,6 +145,10 @@ export default async function AutomationsPage({
   );
   const activeRankProjects = rankSettings?.length || 0;
   const activeOpportunityProjects = opportunitySettings?.length || 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const dueInterventionChecks = (interventionChecks || []).filter(
+    (item) => item.due_date <= today,
+  ).length;
 
   return (
     <div className="page">
@@ -190,6 +206,14 @@ export default async function AutomationsPage({
           <span>Opportunity Engine</span>
           <strong>{activeOpportunityProjects}</strong>
           <small>{workerReady ? "Warehouse worker ready" : "Worker paused"}</small>
+        </article>
+        <article className="healthCard">
+          <span>SEO interventions</span>
+          <strong>{monitoringInterventions || 0}</strong>
+          <small>
+            {dueInterventionChecks} due checks ·{" "}
+            {workerReady ? "monitor worker ready" : "worker paused"}
+          </small>
         </article>
         <article className="healthCard">
           <span>Running / queued jobs</span>
@@ -380,6 +404,67 @@ export default async function AutomationsPage({
         ) : (
           <div className="emptyState smallEmpty">
             <span>No projects have automatic opportunity scans enabled.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>SEO intervention monitoring</h2>
+            <p>
+              D+7, D+14 and D+28 checkpoints wait for first-party warehouse coverage
+              before evaluating post-change movement.
+            </p>
+          </div>
+        </div>
+
+        {(interventionChecks || []).length ? (
+          <div className="automationTaskList">
+            {(interventionChecks || []).slice(0, 20).map((check) => {
+              const project = projectMap.get(check.project_id);
+              const isDue = check.due_date <= today;
+              return (
+                <article className="automationTaskCard" key={check.id}>
+                  <div className="automationTaskTop">
+                    <div>
+                      <p className="eyebrow">
+                        {project?.name || "Project"} · D+{check.checkpoint_days}
+                      </p>
+                      <h3>
+                        {isDue ? "Checkpoint due" : "Waiting for checkpoint date"}
+                      </h3>
+                    </div>
+                    <span className={"jobStatus job-" + (isDue ? "queued" : "idle")}>
+                      {check.result_class === "insufficient_data"
+                        ? "waiting for data"
+                        : check.status}
+                    </span>
+                  </div>
+                  <div className="automationTaskMeta">
+                    <span>Due: {check.due_date}</span>
+                    <span>Last attempt: {formatDate(check.last_attempt_at)}</span>
+                  </div>
+                  {check.last_error ? (
+                    <p className="formMessage formError">{check.last_error}</p>
+                  ) : null}
+                  {project ? (
+                    <div className="buttonRow">
+                      <Link
+                        className="ghostButton"
+                        href={"/projects/" + project.id + "/interventions"}
+                      >
+                        Open interventions
+                      </Link>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="emptyState smallEmpty">
+            <span>No pending intervention checkpoints.</span>
           </div>
         )}
       </section>
