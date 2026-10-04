@@ -30,6 +30,7 @@ export async function fetchGoogleOrganicSerp(input: {
   keyword: string;
   locationCode?: number;
   languageCode?: string;
+  device?: "desktop" | "mobile";
   depth?: number;
 }) {
   const login = process.env.DATAFORSEO_LOGIN;
@@ -44,6 +45,7 @@ export async function fetchGoogleOrganicSerp(input: {
   const keyword = input.keyword.trim();
   if (!keyword) throw new Error("SERP keyword is empty.");
 
+  const depth = Math.min(Math.max(input.depth || 20, 10), 100);
   const auth = Buffer.from(login + ":" + password).toString("base64");
   const response = await fetch(
     "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
@@ -58,7 +60,8 @@ export async function fetchGoogleOrganicSerp(input: {
           keyword,
           location_code: input.locationCode || 2840,
           language_code: input.languageCode || "en",
-          depth: Math.min(Math.max(input.depth || 20, 10), 100),
+          device: input.device || "desktop",
+          depth,
         },
       ]),
       cache: "no-store",
@@ -84,7 +87,7 @@ export async function fetchGoogleOrganicSerp(input: {
 
   const organic = (result.items || [])
     .filter((item) => item.type === "organic")
-    .slice(0, 30)
+    .slice(0, depth)
     .map((item) => ({
       rank: item.rank_absolute || item.rank_group || null,
       domain: item.domain || null,
