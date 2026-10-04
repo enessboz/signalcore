@@ -62,6 +62,8 @@ export async function sendChiefCommand(formData: FormData) {
     { data: schedules },
     { data: recentMessages },
     { data: globalBrain },
+    { data: outputProfiles },
+    { data: budgetLimits },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -97,6 +99,17 @@ export async function sendChiefCommand(formData: FormData) {
       .eq("active", true)
       .order("priority", { ascending: false })
       .limit(30),
+    supabase
+      .from("output_profiles")
+      .select("profile_key,name,output_type,strict_mode,is_default,active")
+      .eq("owner_id", ownerId)
+      .eq("active", true)
+      .order("output_type")
+      .order("is_default", { ascending: false }),
+    supabase
+      .from("budget_limits")
+      .select("project_id,category,monthly_limit,soft_warning_percent,hard_stop")
+      .eq("owner_id", ownerId),
   ]);
 
   if (!chief || !["testing", "active"].includes(chief.status)) {
@@ -109,6 +122,8 @@ export async function sendChiefCommand(formData: FormData) {
       installed_agents: agents || [],
       schedules: schedules || [],
       global_brain: globalBrain || [],
+      output_profiles: outputProfiles || [],
+      budget_limits: budgetLimits || [],
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
@@ -122,6 +137,10 @@ export async function sendChiefCommand(formData: FormData) {
         "run_serp_research",
         "set_google_auto_sync",
         "queue_google_backfill",
+        "add_global_brain_entry",
+        "add_project_background",
+        "assign_output_profile",
+        "set_budget_limit",
       ],
       safety: {
         external_impact_requires_approval: true,
