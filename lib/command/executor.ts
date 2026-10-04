@@ -566,6 +566,13 @@ export async function executeChiefActions(input: {
             target_agent_key: agentKey === "auto" ? "router_orchestrator" : agentKey,
             schedule_kind: kind,
             schedule_config: scheduleConfig,
+            post_run_config: action.follow_up_report
+              ? {
+                  report_on_importance: true,
+                  minimum_importance: action.minimum_importance || "high",
+                  report_format: action.report_format || "summary",
+                }
+              : {},
             timezone,
             status: "active",
             next_run_at: kind === "once" ? action.run_at : null,
@@ -583,7 +590,17 @@ export async function executeChiefActions(input: {
           projectId,
           targetAgentKey: agentKey,
           summary: `Scheduled "${scheduled.title}" (${kind}, ${timezone}).`,
-          data: { scheduled_task_id: scheduled.id, schedule: scheduleConfig },
+          data: {
+            scheduled_task_id: scheduled.id,
+            schedule: scheduleConfig,
+            post_run: action.follow_up_report
+              ? {
+                  report_on_importance: true,
+                  minimum_importance: action.minimum_importance || "high",
+                  report_format: action.report_format || "summary",
+                }
+              : {},
+          },
         });
         continue;
       }
