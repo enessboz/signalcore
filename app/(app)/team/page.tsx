@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { createClient } from "@/lib/supabase/server";
+import { acceptHandoff, rejectHandoff } from "./actions";
 
 type AgentDefinitionRow = {
   agent_key: string;
@@ -44,7 +45,12 @@ function shortTask(value: string | null | undefined) {
   return value.length > 105 ? `${value.slice(0, 102)}…` : value;
 }
 
-export default async function TeamPage() {
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; message?: string }>;
+}) {
+  const query = await searchParams;
   const supabase = await createClient();
 
   const [
@@ -174,6 +180,9 @@ export default async function TeamPage() {
         </div>
       </header>
 
+      {query.error ? <p className="formMessage formError pageMessage">{query.error}</p> : null}
+      {query.message ? <p className="formMessage formSuccess pageMessage">{query.message}</p> : null}
+
       <section className="teamLegend">
         <div><span className="legendDot working" /> Working</div>
         <div><span className="legendDot idle" /> Idle</div>
@@ -252,6 +261,14 @@ export default async function TeamPage() {
                     <strong>→ {handoff.to_agent_key.replaceAll("_", " ")}</strong>
                     <p>{handoff.reason}</p>
                     <span>{handoff.status}</span>
+                    <div className="teamHandoffActions">
+                      <form action={acceptHandoff.bind(null, handoff.id)}>
+                        <button className="secondaryButton" type="submit">Accept</button>
+                      </form>
+                      <form action={rejectHandoff.bind(null, handoff.id)}>
+                        <button className="ghostButton" type="submit">Reject</button>
+                      </form>
+                    </div>
                   </div>
                 ))}
               </div>
