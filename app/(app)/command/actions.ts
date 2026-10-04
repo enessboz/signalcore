@@ -61,6 +61,7 @@ export async function sendChiefCommand(formData: FormData) {
     { data: agents },
     { data: schedules },
     { data: recentMessages },
+    { data: globalBrain },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -89,6 +90,13 @@ export async function sendChiefCommand(formData: FormData) {
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
       .limit(20),
+    supabase
+      .from("global_brain_entries")
+      .select("category,title,content,priority")
+      .eq("owner_id", ownerId)
+      .eq("active", true)
+      .order("priority", { ascending: false })
+      .limit(30),
   ]);
 
   if (!chief || !["testing", "active"].includes(chief.status)) {
@@ -100,6 +108,7 @@ export async function sendChiefCommand(formData: FormData) {
       projects: projects || [],
       installed_agents: agents || [],
       schedules: schedules || [],
+      global_brain: globalBrain || [],
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
