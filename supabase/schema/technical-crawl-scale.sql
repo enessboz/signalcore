@@ -13,10 +13,15 @@ alter table public.crawl_runs
     check (execution_mode in ('inline','queue')),
   add column if not exists queue_started_at timestamptz,
   add column if not exists queue_completed_at timestamptz,
+  add column if not exists last_worker_at timestamptz,
   add column if not exists robots_compliant boolean not null default true,
   add column if not exists js_render_mode text not null default 'off'
     check (js_render_mode in ('off','auto','always')),
   add column if not exists crawl_config jsonb not null default '{}'::jsonb;
+
+create index if not exists crawl_runs_queue_worker_idx
+  on public.crawl_runs(execution_mode,status,last_worker_at,created_at)
+  where execution_mode='queue' and status='running';
 
 alter table public.technical_crawl_schedules
   drop constraint if exists technical_crawl_schedules_max_urls_check;
