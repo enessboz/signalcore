@@ -54,13 +54,13 @@ export default async function TechnicalAuditPage({
   const [{ data: runs }, { data: crawlSchedules }] = await Promise.all([
     supabase
       .from("crawl_runs")
-    .select("id,crawl_type,status,max_urls,pages_discovered,pages_crawled,error_count,summary,started_at,completed_at,created_at")
+    .select("id,crawl_type,status,max_urls,pages_discovered,pages_crawled,error_count,summary,execution_mode,robots_compliant,js_render_mode,crawl_config,queue_started_at,queue_completed_at,started_at,completed_at,created_at")
     .eq("project_id", id)
       .order("created_at", { ascending: false })
       .limit(10),
     supabase
       .from("technical_crawl_schedules")
-      .select("id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,created_at")
+      .select("id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,batch_size,min_delay_ms,respect_robots,js_render_mode,pagespeed_enabled,pagespeed_sample_size,created_at")
       .eq("project_id", id)
       .neq("status", "cancelled")
       .order("created_at", { ascending: false }),
@@ -71,6 +71,10 @@ export default async function TechnicalAuditPage({
     (runs || []).find((run) => run.id === requestedRun) ||
     (runs || [])[0] ||
     null;
+
+  const inventoryPage = Math.max(Number(scalar(query.p, "1")) || 1, 1);
+  const inventoryPageSize = 100;
+  let inventoryTotal = 0;
 
   let pages: Array<{
     id: string;
@@ -103,6 +107,10 @@ export default async function TechnicalAuditPage({
     missing_alt_count: number;
     redirect_chain: unknown;
     fetch_error: string | null;
+    content_simhash: string | null;
+    near_duplicate_group: string | null;
+    rendered: boolean;
+    render_reason: string | null;
   }> = [];
 
   let findings: Array<{
@@ -117,40 +125,84 @@ export default async function TechnicalAuditPage({
 
   let internalLinkCount = 0;
   let externalLinkCount = 0;
+  let robotsAudit: null | {
+    robots_url: string;
+    status_code: number | null;
+    fetch_status: string;
+    crawl_delay_ms: number | null;
+    blocks_all: boolean;
+    sitemap_urls: unknown;
+    error: string | null;
+  } = null;
+  let performanceResults: Array<{
+    id: string;
+    url: string;
+    strategy: string;
+    performance_score: number | null;
+    lcp_ms: number | null;
+    cls: number | null;
+    inp_ms: number | null;
+    fcp_ms: number | null;
+    tbt_ms: number | null;
+    fetched_at: string;
+  }> = [];
 
   if (selectedRun) {
-    const [pageResult, findingResult, internalLinks, externalLinks] =
-      await Promise.all([
-        supabase
-          .from("crawl_pages")
-          .select("id,requested_url,url,final_url,status_code,response_ms,title,meta_description,canonical,robots_meta,x_robots_tag,html_lang,hreflangs,h1s,h2s,word_count,internal_link_count,external_link_count,inlink_count,crawl_depth,sitemap_present,orphan_candidate,indexable,indexability_reason,structured_data_count,invalid_structured_data_count,image_count,missing_alt_count,redirect_chain,fetch_error")
-          .eq("crawl_run_id", selectedRun.id)
-          .order("crawl_depth", { ascending: true, nullsFirst: false })
-          .order("url")
-          .limit(500),
-        supabase
-          .from("findings")
-          .select("id,title,importance,summary,affected_scope,recommended_action,metadata")
-          .eq("project_id", id)
-          .eq("metadata->>crawl_run_id", selectedRun.id)
-          .order("importance")
-          .limit(200),
-        supabase
-          .from("crawl_links")
-          .select("id", { count: "exact", head: true })
-          .eq("crawl_run_id", selectedRun.id)
-          .eq("link_scope", "internal"),
-        supabase
-          .from("crawl_links")
-          .select("id", { count: "exact", head: true })
-          .eq("crawl_run_id", selectedRun.id)
-          .eq("link_scope", "external"),
-      ]);
+    const pageFrom = (inventoryPage - 1) * inventoryPageSize;
+    const pageTo = pageFrom + inventoryPageSize - 1;
+
+    const [
+      pageResult,
+      findingResult,
+      internalLinks,
+      externalLinks,
+      robotsResult,
+      performanceResult,
+    ] = await Promise.all([
+      supabase
+        .from("crawl_pages")
+        .select("id,requested_url,url,final_url,status_code,response_ms,title,meta_description,canonical,robots_meta,x_robots_tag,html_lang,hreflangs,h1s,h2s,word_count,internal_link_count,external_link_count,inlink_count,crawl_depth,sitemap_present,orphan_candidate,indexable,indexability_reason,structured_data_count,invalid_structured_data_count,image_count,missing_alt_count,redirect_chain,fetch_error,content_simhash,near_duplicate_group,rendered,render_reason", { count: "exact" })
+        .eq("crawl_run_id", selectedRun.id)
+        .order("crawl_depth", { ascending: true, nullsFirst: false })
+        .order("url")
+        .range(pageFrom, pageTo),
+      supabase
+        .from("findings")
+        .select("id,title,importance,summary,affected_scope,recommended_action,metadata")
+        .eq("project_id", id)
+        .eq("metadata->>crawl_run_id", selectedRun.id)
+        .order("importance")
+        .limit(300),
+      supabase
+        .from("crawl_links")
+        .select("id", { count: "exact", head: true })
+        .eq("crawl_run_id", selectedRun.id)
+        .eq("link_scope", "internal"),
+      supabase
+        .from("crawl_links")
+        .select("id", { count: "exact", head: true })
+        .eq("crawl_run_id", selectedRun.id)
+        .eq("link_scope", "external"),
+      supabase
+        .from("crawl_robots_audits")
+        .select("robots_url,status_code,fetch_status,crawl_delay_ms,blocks_all,sitemap_urls,error")
+        .eq("crawl_run_id", selectedRun.id)
+        .maybeSingle(),
+      supabase
+        .from("crawl_performance_results")
+        .select("id,url,strategy,performance_score,lcp_ms,cls,inp_ms,fcp_ms,tbt_ms,fetched_at")
+        .eq("crawl_run_id", selectedRun.id)
+        .order("fetched_at", { ascending: false })
+        .limit(100),
+    ]);
 
     pages = (pageResult.data || []) as typeof pages;
+    inventoryTotal = pageResult.count || 0;
     findings = (findingResult.data || []) as typeof findings;
     internalLinkCount = internalLinks.count || 0;
     externalLinkCount = externalLinks.count || 0;
+    robotsAudit = robotsResult.data as typeof robotsAudit;
+    performanceResults = (performanceResult.data || []) as typeof performanceResults;
   }
 
   const summary = (selectedRun?.summary || {}) as Record<string, unknown>;
@@ -211,8 +263,8 @@ export default async function TechnicalAuditPage({
             <h2>Run controlled raw HTTP crawl</h2>
             <p>
               SignalCore follows internal links from the homepage first and uses
-              sitemap URLs for additional coverage. The current synchronous
-              runner is capped at 500 URLs per run.
+              sitemap URLs for additional coverage. Runs up to 500 URLs execute
+              inline; 1K–10K runs use the resumable distributed frontier.
             </p>
           </div>
           <span className="sourceBadge">Raw HTTP V2</span>
@@ -226,8 +278,23 @@ export default async function TechnicalAuditPage({
               <option value="50">50 URLs</option>
               <option value="100">100 URLs · recommended</option>
               <option value="200">200 URLs</option>
-              <option value="500">500 URLs · deeper sample</option>
+              <option value="500">500 URLs · production benchmark</option>
+              <option value="1000">1,000 URLs · distributed</option>
+              <option value="5000">5,000 URLs · distributed</option>
+              <option value="10000">10,000 URLs · distributed target</option>
             </select>
+          </label>
+          <label>
+            JS rendering
+            <select name="jsRenderMode" defaultValue="auto">
+              <option value="off">Off · raw HTML only</option>
+              <option value="auto">Auto · JS fallback only when needed</option>
+              <option value="always">Always · expensive</option>
+            </select>
+          </label>
+          <label className="checkboxLabel">
+            <input name="pagespeedEnabled" type="checkbox" />
+            Queue selective PageSpeed sample
           </label>
           <button className="primaryButton" type="submit" disabled={!project.domain}>
             Run Technical Crawl
@@ -280,8 +347,37 @@ export default async function TechnicalAuditPage({
                   <option value="50">50 URLs</option>
                   <option value="100">100 URLs</option>
                   <option value="200">200 URLs</option>
-                  <option value="500">500 URLs</option>
+                  <option value="500">500 URLs · inline</option>
+                  <option value="1000">1,000 URLs · distributed</option>
+                  <option value="5000">5,000 URLs · distributed</option>
+                  <option value="10000">10,000 URLs · distributed</option>
+                  <option value="25000">25,000 URLs · distributed</option>
+                  <option value="50000">50,000 URLs · distributed</option>
                 </select>
+              </label>
+              <label>
+                Batch size
+                <input name="batchSize" type="number" min="5" max="100" defaultValue="50" />
+              </label>
+              <label>
+                Minimum request delay (ms)
+                <input name="minDelayMs" type="number" min="0" max="10000" step="50" defaultValue="250" />
+              </label>
+              <label>
+                JS rendering
+                <select name="jsRenderMode" defaultValue="auto">
+                  <option value="off">Off</option>
+                  <option value="auto">Auto fallback</option>
+                  <option value="always">Always</option>
+                </select>
+              </label>
+              <label className="checkboxLabel">
+                <input name="pagespeedEnabled" type="checkbox" />
+                Selective PageSpeed audit
+              </label>
+              <label>
+                PageSpeed sample size
+                <input name="pagespeedSampleSize" type="number" min="0" max="100" defaultValue="20" />
               </label>
               <label>
                 Cadence
@@ -351,7 +447,10 @@ export default async function TechnicalAuditPage({
                     )}
                   </p>
                   <div className="automationTaskMeta">
-                    <span>{schedule.max_urls} URL limit</span>
+                    <span>{schedule.max_urls.toLocaleString("en-US")} URL limit</span>
+                    <span>{schedule.max_urls > 500 ? "distributed" : "inline"} · batch {schedule.batch_size || 50}</span>
+                    <span>delay ≥ {schedule.min_delay_ms || 0} ms · robots {schedule.respect_robots ? "on" : "off"}</span>
+                    <span>JS {schedule.js_render_mode || "off"} · PSI {schedule.pagespeed_enabled ? schedule.pagespeed_sample_size + " URLs" : "off"}</span>
                     <span>Last: {schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString("en-GB") : "Never"}</span>
                     <span>State: {schedule.last_status}</span>
                     <span>Failures: {schedule.failure_count || 0}</span>
@@ -417,7 +516,7 @@ export default async function TechnicalAuditPage({
           <section className="healthGrid technicalHealthGrid">
             <article className="healthCard">
               <span>Pages crawled</span>
-              <strong>{selectedRun.pages_crawled}</strong>
+              <strong>{selectedRun.pages_crawled.toLocaleString("en-US")}</strong>
               <small>
                 {String(summary.sitemap_urls_discovered || 0)} sitemap URLs discovered
               </small>
@@ -446,6 +545,31 @@ export default async function TechnicalAuditPage({
               <span>Redirected pages</span>
               <strong>{redirectPages}</strong>
               <small>{selectedRun.error_count} fetch / HTTP errors</small>
+            </article>
+            <article className="healthCard">
+              <span>Execution</span>
+              <strong>{selectedRun.execution_mode || "inline"}</strong>
+              <small>
+                {selectedRun.execution_mode === "queue"
+                  ? String(summary.frontier_queued || 0) + " queued · " + String(summary.frontier_claimed || 0) + " claimed"
+                  : selectedRun.js_render_mode + " JS mode"}
+              </small>
+            </article>
+            <article className="healthCard">
+              <span>Robots compliance</span>
+              <strong className={robotsAudit?.fetch_status === "failed" ? "healthBad" : "healthGood"}>
+                {robotsAudit?.fetch_status || (selectedRun.robots_compliant ? "enabled" : "off")}
+              </strong>
+              <small>
+                {robotsAudit?.crawl_delay_ms
+                  ? "crawl-delay " + robotsAudit.crawl_delay_ms + " ms"
+                  : "no robots crawl-delay"}
+              </small>
+            </article>
+            <article className="healthCard">
+              <span>Performance samples</span>
+              <strong>{performanceResults.length}</strong>
+              <small>PageSpeed / CWV results</small>
             </article>
             <article className="healthCard">
               <span>Technical findings</span>
@@ -543,6 +667,8 @@ export default async function TechnicalAuditPage({
                     <th>H1</th>
                     <th>Words</th>
                     <th>Schema</th>
+                    <th>Render</th>
+                    <th>Near dup</th>
                     <th>Response</th>
                   </tr>
                 </thead>
@@ -604,6 +730,8 @@ export default async function TechnicalAuditPage({
                             ? " / " + page.invalid_structured_data_count + " invalid"
                             : ""}
                         </td>
+                        <td>{page.rendered ? "JS" : "HTTP"}</td>
+                        <td>{page.near_duplicate_group || "—"}</td>
                         <td>{page.response_ms ? page.response_ms + " ms" : "—"}</td>
                       </tr>
                     );
@@ -611,6 +739,44 @@ export default async function TechnicalAuditPage({
                 </tbody>
               </table>
             </div>
+            {inventoryTotal > inventoryPageSize ? (
+              <div className="buttonRow">
+                {inventoryPage > 1 ? (
+                  <Link
+                    className="ghostButton"
+                    href={
+                      "/projects/" +
+                      id +
+                      "/technical?run=" +
+                      selectedRun.id +
+                      "&p=" +
+                      String(inventoryPage - 1)
+                    }
+                  >
+                    Previous 100
+                  </Link>
+                ) : null}
+                <span className="muted">
+                  Page {inventoryPage} of {Math.ceil(inventoryTotal / inventoryPageSize)} ·{" "}
+                  {inventoryTotal.toLocaleString("en-US")} stored URLs
+                </span>
+                {inventoryPage * inventoryPageSize < inventoryTotal ? (
+                  <Link
+                    className="ghostButton"
+                    href={
+                      "/projects/" +
+                      id +
+                      "/technical?run=" +
+                      selectedRun.id +
+                      "&p=" +
+                      String(inventoryPage + 1)
+                    }
+                  >
+                    Next 100
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <div className="twoCol dataTwoCol">
@@ -678,9 +844,37 @@ export default async function TechnicalAuditPage({
                   </div>
                   <div>
                     <strong>Raw crawler</strong>
-                    <span>{String(summary.crawler_version || "raw-http-v2")}</span>
+                    <span>{String(summary.crawler_version || "raw-http-v3")}</span>
                   </div>
                 </div>
+              </section>
+
+              <section className="panel">
+                <div className="panelHeader">
+                  <div>
+                    <h2>PageSpeed / Core Web Vitals</h2>
+                    <p>Selective sample only; crawler coverage does not trigger PSI for every URL.</p>
+                  </div>
+                </div>
+                {performanceResults.length ? (
+                  <div className="savedViewList">
+                    {performanceResults.slice(0, 20).map((result) => (
+                      <div className="savedViewRow" key={result.id}>
+                        <strong>{compactUrl(result.url)}</strong>
+                        <span>
+                          Score {result.performance_score === null ? "—" : Math.round(result.performance_score * 100)}
+                          {" · "}LCP {result.lcp_ms === null ? "—" : Math.round(result.lcp_ms) + " ms"}
+                          {" · "}CLS {result.cls === null ? "—" : Number(result.cls).toFixed(3)}
+                          {" · "}INP {result.inp_ms === null ? "—" : Math.round(result.inp_ms) + " ms"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="emptyState smallEmpty">
+                    <span>No PageSpeed results for this run yet.</span>
+                  </div>
+                )}
               </section>
 
               <section className="panel">
