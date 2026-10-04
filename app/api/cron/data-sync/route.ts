@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { recoverStaleGoogleSyncJobs } from "@/lib/runtime/recovery";
 import { enqueueGoogleSync, processGoogleSyncJob } from "@/lib/google/sync";
+import { evaluateGoogleWarehouseHealth } from "@/lib/google/warehouse-health";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -177,12 +178,43 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const healthResults: Array<Record<string, unknown>> = [];
+  const projectOwners = new Map<string, string>();
+
+  for (const binding of bindings || []) {
+    projectOwners.set(binding.project_id, binding.owner_id);
+  }
+  for (const job of jobs || []) {
+    projectOwners.set(job.project_id, job.owner_id);
+  }
+
+  for (const [projectId, ownerId] of projectOwners) {
+    try {
+      const result = await evaluateGoogleWarehouseHealth({
+        client: supabase,
+        projectId,
+        ownerId,
+      });
+      healthResults.push({
+        project_id: projectId,
+        opened: result.opened,
+        resolved: result.resolved,
+      });
+    } catch (error) {
+      healthResults.push({
+        project_id: projectId,
+        error: error instanceof Error ? error.message : "Health evaluation failed",
+      });
+    }
+  }
+
   return NextResponse.json({
     recovered_stale_jobs: recoveredStaleJobs,
     bindings_checked: bindings?.length || 0,
     enqueue_results: enqueueResults,
     jobs_processed: processed.length,
     processed,
+    health_results: healthResults,
     elapsed_ms: Date.now() - startedAt,
     time: new Date().toISOString(),
   });
