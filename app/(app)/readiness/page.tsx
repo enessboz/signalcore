@@ -38,6 +38,8 @@ export default async function ReadinessPage() {
     { count: outputs },
     { count: projects },
     { count: budgetLimits },
+    { count: activeTechnicalSchedules },
+    { count: activeSalesAutomations },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -85,6 +87,15 @@ export default async function ReadinessPage() {
     supabase
       .from("budget_limits")
       .select("id", { count: "exact", head: true }),
+    supabase
+      .from("technical_crawl_schedules")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["active", "running"]),
+    supabase
+      .from("sales_campaigns")
+      .select("id", { count: "exact", head: true })
+      .eq("auto_discovery_enabled", true)
+      .in("status", ["draft", "active"]),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -96,6 +107,12 @@ export default async function ReadinessPage() {
   const dataForSeoReady = Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
   const githubPrivateReady = Boolean(process.env.GITHUB_TOKEN);
   const cronSecretReady = Boolean(process.env.CRON_SECRET);
+  const deterministicWorkerReady = supabaseWorkerReady && cronSecretReady;
+  const salesWorkerReady = deterministicWorkerReady && dataForSeoReady;
+  const totalScheduled =
+    (activeSchedules || 0) +
+    (activeTechnicalSchedules || 0) +
+    (activeSalesAutomations || 0);
 
   const coreItems: ReadinessItem[] = [
     {
@@ -128,10 +145,10 @@ export default async function ReadinessPage() {
     },
     {
       label: "Background worker",
-      ready: supabaseWorkerReady && cronSecretReady,
-      detail: supabaseWorkerReady
-        ? "Server worker credentials are present."
-        : "SUPABASE_SECRET_KEY is missing. Scheduler remains intentionally paused.",
+      ready: deterministicWorkerReady,
+      detail: deterministicWorkerReady
+        ? "Deterministic Google sync and technical crawl workers can run."
+        : "SUPABASE_SECRET_KEY and CRON_SECRET are required. Background workers remain intentionally paused.",
       actionHref: "/automations",
       actionLabel: "Automations",
     },
@@ -162,6 +179,26 @@ export default async function ReadinessPage() {
       actionLabel: "Global Brain",
     },
     {
+      label: "Technical crawl automation",
+      ready: deterministicWorkerReady,
+      optional: true,
+      detail: deterministicWorkerReady
+        ? `${activeTechnicalSchedules || 0} active deterministic crawl schedule(s).`
+        : `${activeTechnicalSchedules || 0} schedules configured; activation waits for worker secrets.`,
+      actionHref: "/automations",
+      actionLabel: "Automations",
+    },
+    {
+      label: "Sales discovery automation",
+      ready: salesWorkerReady,
+      optional: true,
+      detail: salesWorkerReady
+        ? `${activeSalesAutomations || 0} automated Sales campaign(s) can run.`
+        : `${activeSalesAutomations || 0} campaigns configured; DataForSEO + worker credentials are required.`,
+      actionHref: "/sales",
+      actionLabel: "Sales",
+    },
+    {
       label: "Cost guardrails",
       ready: Boolean(budgetLimits),
       optional: true,
@@ -181,7 +218,9 @@ export default async function ReadinessPage() {
     {
       label: "Technical evidence layer",
       ready: true,
-      detail: `${crawlRuns || 0} crawl runs stored. HTTP crawler and technical rule engine installed.`,
+      detail: `${crawlRuns || 0} crawl runs stored. Raw HTTP V2 includes internal link graph, depth/inlinks, sitemap/orphan evidence, delta regressions, canonical target checks and hreflang graph validation.`,
+      actionHref: "/automations",
+      actionLabel: "Crawler automations",
     },
     {
       label: "Persistent outputs",
@@ -224,8 +263,10 @@ export default async function ReadinessPage() {
         </article>
         <article className="healthCard">
           <span>Scheduled work</span>
-          <strong>{activeSchedules || 0}</strong>
-          <small>Will run after worker activation</small>
+          <strong>{totalScheduled}</strong>
+          <small>
+            {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales
+          </small>
         </article>
         <article className="healthCard">
           <span>Pending approvals</span>
@@ -298,8 +339,9 @@ export default async function ReadinessPage() {
         <div>
           <h2>Activation order</h2>
           <p>
-            1. Add OPENAI_API_KEY. 2. Add SUPABASE_SECRET_KEY. 3. Re-enable the scheduler.
-            4. Seed Global Brain rules. 5. Run controlled project tests before enabling external executors.
+            1. Add OPENAI_API_KEY. 2. Add SUPABASE_SECRET_KEY. 3. Verify CRON_SECRET.
+            4. Re-enable the required Supabase Cron workers. 5. Seed Global Brain rules.
+            6. Run controlled project tests before enabling any external-impact executor.
           </p>
         </div>
         <div className="buttonRow">
