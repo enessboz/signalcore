@@ -36,7 +36,7 @@ create policy "google_sync_date_log_select_own"
 on public.google_sync_date_log
 for select
 to authenticated
-using (owner_id = auth.uid());
+using (owner_id = (select auth.uid()));
 
 grant select on public.google_sync_date_log to authenticated;
 grant select,insert,update,delete on public.google_sync_date_log to service_role;
