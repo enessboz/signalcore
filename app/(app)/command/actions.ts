@@ -110,6 +110,7 @@ export async function sendChiefCommand(formData: FormData) {
         "run_technical_audit",
         "run_prospect_audit",
         "link_github_repo",
+        "run_serp_research",
       ],
       safety: {
         external_impact_requires_approval: true,
