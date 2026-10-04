@@ -100,4 +100,146 @@ create table if not exists public.sales_discovery_runs (
   completed_at timestamptz
 );
 
--- Production rollout enables owner-scoped RLS, grants and covering indexes.
+-- Owner-scoped RLS, grants and covering indexes are included below.
+
+
+alter table public.sales_campaigns
+  add column if not exists auto_discovery_enabled boolean not null default false,
+  add column if not exists schedule_kind text
+    check (schedule_kind in ('daily','weekly','monthly')),
+  add column if not exists schedule_config jsonb not null default '{}'::jsonb,
+  add column if not exists timezone text not null default 'Europe/Istanbul',
+  add column if not exists auto_qualify_count integer not null default 0
+    check (auto_qualify_count between 0 and 10),
+  add column if not exists last_auto_run_at timestamptz,
+  add column if not exists last_auto_status text not null default 'idle'
+    check (last_auto_status in ('idle','running','succeeded','partial','failed','paused')),
+  add column if not exists last_auto_error text,
+  add column if not exists auto_failure_count integer not null default 0;
+
+create index if not exists sales_campaigns_owner_status_idx
+  on public.sales_campaigns(owner_id,status,updated_at desc);
+create index if not exists sales_campaigns_auto_schedule_idx
+  on public.sales_campaigns(owner_id,auto_discovery_enabled,status,last_auto_run_at)
+  where auto_discovery_enabled=true;
+create index if not exists sales_leads_owner_stage_score_idx
+  on public.sales_leads(owner_id,stage,score desc,updated_at desc);
+create index if not exists sales_leads_converted_project_idx
+  on public.sales_leads(converted_project_id);
+create index if not exists sales_leads_converted_project_owner_fk_idx
+  on public.sales_leads(converted_project_id,owner_id);
+create index if not exists sales_campaign_leads_owner_idx
+  on public.sales_campaign_leads(owner_id,campaign_id,discovered_at desc);
+create index if not exists sales_campaign_leads_lead_idx
+  on public.sales_campaign_leads(lead_id);
+create index if not exists sales_contacts_owner_lead_idx
+  on public.sales_contacts(owner_id,lead_id,is_primary desc);
+create index if not exists sales_contacts_lead_fk_idx
+  on public.sales_contacts(lead_id);
+create index if not exists sales_events_owner_lead_idx
+  on public.sales_events(owner_id,lead_id,created_at desc);
+create index if not exists sales_events_lead_fk_idx
+  on public.sales_events(lead_id);
+create index if not exists sales_discovery_runs_owner_campaign_idx
+  on public.sales_discovery_runs(owner_id,campaign_id,started_at desc);
+create index if not exists sales_discovery_runs_campaign_fk_idx
+  on public.sales_discovery_runs(campaign_id);
+
+grant select,insert,update,delete on public.sales_campaigns to authenticated;
+grant select,insert,update,delete on public.sales_leads to authenticated;
+grant select,insert,update,delete on public.sales_campaign_leads to authenticated;
+grant select,insert,update,delete on public.sales_contacts to authenticated;
+grant select,insert,update,delete on public.sales_events to authenticated;
+grant select,insert,update,delete on public.sales_discovery_runs to authenticated;
+grant usage,select on all sequences in schema public to authenticated;
+
+alter table public.sales_campaigns enable row level security;
+alter table public.sales_leads enable row level security;
+alter table public.sales_campaign_leads enable row level security;
+alter table public.sales_contacts enable row level security;
+alter table public.sales_events enable row level security;
+alter table public.sales_discovery_runs enable row level security;
+
+drop policy if exists sales_campaigns_select_own on public.sales_campaigns;
+create policy sales_campaigns_select_own on public.sales_campaigns
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_campaigns_insert_own on public.sales_campaigns;
+create policy sales_campaigns_insert_own on public.sales_campaigns
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_campaigns_update_own on public.sales_campaigns;
+create policy sales_campaigns_update_own on public.sales_campaigns
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_campaigns_delete_own on public.sales_campaigns;
+create policy sales_campaigns_delete_own on public.sales_campaigns
+  for delete to authenticated using ((select auth.uid())=owner_id);
+
+drop policy if exists sales_leads_select_own on public.sales_leads;
+create policy sales_leads_select_own on public.sales_leads
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_leads_insert_own on public.sales_leads;
+create policy sales_leads_insert_own on public.sales_leads
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_leads_update_own on public.sales_leads;
+create policy sales_leads_update_own on public.sales_leads
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_leads_delete_own on public.sales_leads;
+create policy sales_leads_delete_own on public.sales_leads
+  for delete to authenticated using ((select auth.uid())=owner_id);
+
+drop policy if exists sales_campaign_leads_select_own on public.sales_campaign_leads;
+create policy sales_campaign_leads_select_own on public.sales_campaign_leads
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_campaign_leads_insert_own on public.sales_campaign_leads;
+create policy sales_campaign_leads_insert_own on public.sales_campaign_leads
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_campaign_leads_update_own on public.sales_campaign_leads;
+create policy sales_campaign_leads_update_own on public.sales_campaign_leads
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_campaign_leads_delete_own on public.sales_campaign_leads;
+create policy sales_campaign_leads_delete_own on public.sales_campaign_leads
+  for delete to authenticated using ((select auth.uid())=owner_id);
+
+drop policy if exists sales_contacts_select_own on public.sales_contacts;
+create policy sales_contacts_select_own on public.sales_contacts
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_contacts_insert_own on public.sales_contacts;
+create policy sales_contacts_insert_own on public.sales_contacts
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_contacts_update_own on public.sales_contacts;
+create policy sales_contacts_update_own on public.sales_contacts
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_contacts_delete_own on public.sales_contacts;
+create policy sales_contacts_delete_own on public.sales_contacts
+  for delete to authenticated using ((select auth.uid())=owner_id);
+
+drop policy if exists sales_events_select_own on public.sales_events;
+create policy sales_events_select_own on public.sales_events
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_events_insert_own on public.sales_events;
+create policy sales_events_insert_own on public.sales_events
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_events_update_own on public.sales_events;
+create policy sales_events_update_own on public.sales_events
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_events_delete_own on public.sales_events;
+create policy sales_events_delete_own on public.sales_events
+  for delete to authenticated using ((select auth.uid())=owner_id);
+
+drop policy if exists sales_discovery_runs_select_own on public.sales_discovery_runs;
+create policy sales_discovery_runs_select_own on public.sales_discovery_runs
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists sales_discovery_runs_insert_own on public.sales_discovery_runs;
+create policy sales_discovery_runs_insert_own on public.sales_discovery_runs
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists sales_discovery_runs_update_own on public.sales_discovery_runs;
+create policy sales_discovery_runs_update_own on public.sales_discovery_runs
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists sales_discovery_runs_delete_own on public.sales_discovery_runs;
+create policy sales_discovery_runs_delete_own on public.sales_discovery_runs
+  for delete to authenticated using ((select auth.uid())=owner_id);
