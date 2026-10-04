@@ -4,7 +4,7 @@ import { ProjectTypeBadge } from "@/components/project-type-badge";
 import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectType } from "@/lib/domain/types";
-import { addBackgroundSource, bindGoogleResource, queueGoogleBackfill, setGoogleAutoSync } from "./actions";
+import { addBackgroundSource, bindGoogleResource, convertProjectToClient, queueGoogleBackfill, setGoogleAutoSync } from "./actions";
 
 type Resource = {
   id: string;
@@ -106,7 +106,14 @@ export default async function ProjectPage({
           <h1>{project.name}</h1>
           <p className="muted">{project.domain || "Domain not configured"}</p>
         </div>
-        <ProjectTypeBadge type={project.project_type as ProjectType} />
+        <div className="buttonRow">
+          <ProjectTypeBadge type={project.project_type as ProjectType} />
+          {project.project_type === "lead_prospect" ? (
+            <form action={convertProjectToClient.bind(null, id)}>
+              <button className="primaryButton" type="submit">Convert to Client</button>
+            </form>
+          ) : null}
+        </div>
       </header>
 
       <ProjectDataNav projectId={id} active="overview" />
