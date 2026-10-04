@@ -69,6 +69,23 @@ type GscQueryPageInsightPayload = {
   url_switches?: QueryUrlSwitch[];
 };
 
+type CoverageSource = {
+  current_days?: number;
+  previous_days?: number;
+  min_date?: string | null;
+  max_date?: string | null;
+};
+
+type WarehouseCoverage = {
+  window_days?: number;
+  gsc?: CoverageSource;
+  gsc_query_page?: CoverageSource;
+  ga4?: CoverageSource;
+};
+
+const MIN_CURRENT_DAYS = 14;
+const MIN_COMPARISON_DAYS = 21;
+
 type Candidate = {
   findingType: FindingType;
   fingerprint: string;
@@ -112,6 +129,7 @@ function normalizeUrl(value: string | null | undefined) {
 function addGscQueryCandidates(
   rows: QueryComparison[],
   candidates: Candidate[],
+  comparisonReady: boolean,
 ) {
   for (const row of rows) {
     const currentImpressions = number(row.current_impressions);
@@ -183,6 +201,8 @@ function addGscQueryCandidates(
         },
       });
     }
+
+    if (!comparisonReady) continue;
 
     const impressionChange = pctChange(currentImpressions, previousImpressions);
     if (
@@ -397,6 +417,7 @@ function addGscPageCandidates(
 function addGscQueryPageCandidates(
   payload: GscQueryPageInsightPayload | null,
   candidates: Candidate[],
+  comparisonReady: boolean,
 ) {
   if (!payload) return;
 
@@ -438,6 +459,8 @@ function addGscQueryPageCandidates(
       },
     });
   }
+
+  if (!comparisonReady) return;
 
   for (const row of payload.url_switches || []) {
     const currentImpressions = number(row.current_total_impressions);
@@ -742,6 +765,43 @@ export async function detectWarehouseOpportunities(input: {
 }) {
   const supabase = input.client || (await createClient());
   const candidates: Candidate[] = [];
+
+  const { data: coverageData, error: coverageError } = await supabase.rpc(
+    "get_warehouse_coverage",
+    {
+      p_project_id: input.projectId,
+      p_days: 28,
+    },
+  );
+  if (coverageError) {
+    throw new Error("Warehouse coverage check failed: " + coverageError.message);
+  }
+
+  const coverage = (coverageData || {}) as WarehouseCoverage;
+  const gscCurrentDays = number(coverage.gsc?.current_days);
+  const gscPreviousDays = number(coverage.gsc?.previous_days);
+  const gscQueryPageCurrentDays = number(
+    coverage.gsc_query_page?.current_days,
+  );
+  const gscQueryPagePreviousDays = number(
+    coverage.gsc_query_page?.previous_days,
+  );
+  const ga4CurrentDays = number(coverage.ga4?.current_days);
+  const ga4PreviousDays = number(coverage.ga4?.previous_days);
+
+  const gscCurrentReady = gscCurrentDays >= MIN_CURRENT_DAYS;
+  const gscComparisonReady =
+    gscCurrentDays >= MIN_COMPARISON_DAYS &&
+    gscPreviousDays >= MIN_COMPARISON_DAYS;
+  const gscQueryPageCurrentReady =
+    gscQueryPageCurrentDays >= MIN_CURRENT_DAYS;
+  const gscQueryPageComparisonReady =
+    gscQueryPageCurrentDays >= MIN_COMPARISON_DAYS &&
+    gscQueryPagePreviousDays >= MIN_COMPARISON_DAYS;
+  const ga4ComparisonReady =
+    ga4CurrentDays >= MIN_COMPARISON_DAYS &&
+    ga4PreviousDays >= MIN_COMPARISON_DAYS;
+
   let gscPayload: GscOpportunityPayload | null = null;
   let gscQueryPagePayload: GscQueryPageInsightPayload | null = null;
   let ga4Payload: Record<string, unknown> | null = null;
@@ -757,8 +817,13 @@ export async function detectWarehouseOpportunities(input: {
 
     const queries = gscPayload?.queries || [];
     const pages = gscPayload?.pages || [];
-    addGscQueryCandidates(queries, candidates);
-    addGscPageCandidates(pages, candidates);
+
+    if (gscCurrentReady) {
+      addGscQueryCandidates(queries, candidates, gscComparisonReady);
+    }
+    if (gscComparisonReady) {
+      addGscPageCandidates(pages, candidates);
+    }
 
     const { data: queryPageData, error: queryPageError } = await supabase.rpc(
       "get_gsc_query_page_insights",
@@ -776,7 +841,13 @@ export async function detectWarehouseOpportunities(input: {
     }
     gscQueryPagePayload =
       (queryPageData || {}) as GscQueryPageInsightPayload;
-    addGscQueryPageCandidates(gscQueryPagePayload, candidates);
+    if (gscQueryPageCurrentReady) {
+      addGscQueryPageCandidates(
+        gscQueryPagePayload,
+        candidates,
+        gscQueryPageComparisonReady,
+      );
+    }
   }
 
   if (input.scanGa4 !== false) {
@@ -786,10 +857,16 @@ export async function detectWarehouseOpportunities(input: {
     });
     if (error) throw new Error("GA4 opportunity summary failed: " + error.message);
     ga4Payload = (data || {}) as Record<string, unknown>;
-    addGa4Candidates(ga4Payload, candidates);
+    if (ga4ComparisonReady) {
+      addGa4Candidates(ga4Payload, candidates);
+    }
   }
 
-  if (input.scanRank !== false && gscPayload?.queries?.length) {
+  if (
+    input.scanRank !== false &&
+    gscCurrentReady &&
+    gscPayload?.queries?.length
+  ) {
     await addRankCrossSourceCandidates({
       supabase,
       ownerId: input.ownerId,
@@ -880,8 +957,21 @@ export async function detectWarehouseOpportunities(input: {
     medium: ordered.filter((item) => item.importance === "medium").length,
     low: ordered.filter((item) => item.importance === "low").length,
     dataDate,
+    coverage,
+    readiness: {
+      gsc_current: gscCurrentReady,
+      gsc_comparison: gscComparisonReady,
+      gsc_query_page_current: gscQueryPageCurrentReady,
+      gsc_query_page_comparison: gscQueryPageComparisonReady,
+      ga4_comparison: ga4ComparisonReady,
+    },
     gscAvailable: Boolean(gscPayload?.available),
+    gscReady: gscCurrentReady,
+    gscComparisonReady,
     gscQueryPageAvailable: Boolean(gscQueryPagePayload?.available),
+    gscQueryPageReady: gscQueryPageCurrentReady,
+    gscQueryPageComparisonReady,
     ga4Available: Boolean(ga4Payload?.available),
+    ga4Ready: ga4ComparisonReady,
   };
 }
