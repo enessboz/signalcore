@@ -575,6 +575,39 @@ async function addRankCrossSourceCandidates(input: {
   }
 }
 
+async function loadFindingStatuses(input: {
+  supabase: SupabaseClient;
+  ownerId: string;
+  projectId: string;
+  fingerprints: string[];
+}) {
+  const status = new Map<string, string>();
+
+  for (let index = 0; index < input.fingerprints.length; index += 150) {
+    const chunk = input.fingerprints.slice(index, index + 150);
+    if (!chunk.length) continue;
+
+    const { data, error } = await input.supabase
+      .from("findings")
+      .select("fingerprint,status")
+      .eq("project_id", input.projectId)
+      .eq("owner_id", input.ownerId)
+      .in("fingerprint", chunk);
+
+    if (error) {
+      throw new Error(
+        "Existing opportunity status lookup failed: " + error.message,
+      );
+    }
+
+    for (const item of data || []) {
+      status.set(item.fingerprint, item.status);
+    }
+  }
+
+  return status;
+}
+
 export async function detectWarehouseOpportunities(input: {
   ownerId: string;
   projectId: string;
@@ -644,6 +677,13 @@ export async function detectWarehouseOpportunities(input: {
 
   const now = new Date().toISOString();
   if (ordered.length) {
+    const statusByFingerprint = await loadFindingStatuses({
+      supabase,
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      fingerprints: ordered.map((candidate) => candidate.fingerprint),
+    });
+
     const { error } = await supabase.from("findings").upsert(
       ordered.map((candidate) => ({
         project_id: input.projectId,
@@ -654,6 +694,7 @@ export async function detectWarehouseOpportunities(input: {
         why_it_matters: candidate.whyItMatters,
         importance: candidate.importance,
         confidence: candidate.confidence,
+        status: statusByFingerprint.get(candidate.fingerprint) || "open",
         fingerprint: candidate.fingerprint,
         affected_scope: candidate.affectedScope,
         recommended_action: candidate.recommendedAction,
