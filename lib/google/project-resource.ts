@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 export type GoogleBindingType = "gsc" | "ga4";
@@ -5,8 +6,9 @@ export type GoogleBindingType = "gsc" | "ga4";
 export async function getProjectGoogleResource(
   projectId: string,
   bindingType: GoogleBindingType,
+  client?: SupabaseClient,
 ) {
-  const supabase = await createClient();
+  const supabase = client || (await createClient());
 
   const { data: binding, error } = await supabase
     .from("project_bindings")
