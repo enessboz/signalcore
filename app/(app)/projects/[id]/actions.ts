@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { enqueueGoogleSync } from "@/lib/google/sync";
 import { createClient } from "@/lib/supabase/server";
 
 function textValue(formData: FormData, key: string) {
@@ -152,4 +153,95 @@ export async function bindGoogleResource(
   redirect(
     `/projects/${projectId}?message=${bindingType.toUpperCase()}%20property%20connected%20to%20project`,
   );
+}
+
+
+function isoDaysAgo(days: number) {
+  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+}
+
+export async function setGoogleAutoSync(
+  projectId: string,
+  bindingType: "gsc" | "ga4",
+  enabled: boolean,
+) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (!ownerId) redirect("/login");
+
+  const { error } = await supabase
+    .from("project_bindings")
+    .update({
+      auto_sync_enabled: enabled,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId)
+    .eq("binding_type", bindingType)
+    .eq("binding_role", "primary");
+
+  if (error) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect(
+    `/projects/${projectId}?message=${bindingType.toUpperCase()}%20auto%20sync%20${enabled ? "enabled" : "disabled"}`,
+  );
+}
+
+export async function queueGoogleBackfill(
+  projectId: string,
+  bindingType: "gsc" | "ga4",
+  formData: FormData,
+) {
+  const requestedDays = Number(String(formData.get("days") || "90"));
+  const days = [30, 90, 180].includes(requestedDays) ? requestedDays : 90;
+
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (!ownerId) redirect("/login");
+
+  const { data: binding } = await supabase
+    .from("project_bindings")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId)
+    .eq("binding_type", bindingType)
+    .eq("binding_role", "primary")
+    .maybeSingle();
+
+  if (!binding) {
+    redirect(
+      `/projects/${projectId}?error=${bindingType.toUpperCase()}%20property%20must%20be%20selected%20before%20backfill`,
+    );
+  }
+
+  const lagDays = bindingType === "gsc" ? 3 : 1;
+  const endDate = isoDaysAgo(lagDays);
+  const startDate = isoDaysAgo(lagDays + days - 1);
+
+  try {
+    const jobId = await enqueueGoogleSync({
+      ownerId,
+      projectId,
+      source: bindingType,
+      startDate,
+      endDate,
+      mode: "backfill",
+      priority: 60,
+      client: supabase,
+    });
+
+    redirect(
+      `/projects/${projectId}?message=${bindingType.toUpperCase()}%20${days}-day%20backfill%20queued%20(${jobId.slice(0, 8)})`,
+    );
+  } catch (error) {
+    redirect(
+      `/projects/${projectId}?error=${encodeURIComponent(
+        error instanceof Error ? error.message : "Backfill could not be queued",
+      )}`,
+    );
+  }
 }
