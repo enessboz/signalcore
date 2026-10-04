@@ -107,7 +107,10 @@ export async function POST(request: NextRequest) {
   for (const job of jobs || []) {
     if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
 
-    const maxDates = job.source === "gsc" ? 2 : 4;
+    // Backfills are bounded primarily by SAFE_RUNTIME_MS. Higher per-job caps let
+    // Hobby's once-daily cron use the available runtime instead of advancing only
+    // a handful of dates per day; large datasets still checkpoint and stop on time.
+    const maxDates = job.source === "gsc" ? 30 : 60;
     let currentJob = { ...job };
     let datesProcessed = 0;
     let rowsProcessed = 0;
