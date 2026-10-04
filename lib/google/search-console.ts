@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getGoogleAccessToken } from "@/lib/google/access-token";
 
 export type GscDimension =
@@ -48,8 +49,8 @@ export type GscResponse = {
   };
 };
 
-export async function querySearchConsole(input: GscQueryInput) {
-  const { accessToken } = await getGoogleAccessToken();
+export async function querySearchConsole(input: GscQueryInput, client?: SupabaseClient) {
+  const { accessToken } = await getGoogleAccessToken(client);
   const filters = (input.filters || []).filter((filter) => filter.expression.trim());
 
   const body: Record<string, unknown> = {
