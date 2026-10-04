@@ -75,7 +75,7 @@ export async function runSalesDiscoveryCampaign(input: {
 
   const { data: campaign, error: campaignError } = await supabase
     .from("sales_campaigns")
-    .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd")
+    .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd,monthly_budget_usd,monthly_budget_hard_stop")
     .eq("id", input.campaignId)
     .eq("owner_id", input.ownerId)
     .single();
@@ -89,6 +89,25 @@ export async function runSalesDiscoveryCampaign(input: {
     : [];
 
   if (!queries.length) throw new Error("Sales campaign has no discovery queries.");
+
+  const monthStart = new Date(
+    Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1),
+  ).toISOString();
+  const { data: monthlyRuns, error: monthlyRunsError } = await supabase
+    .from("sales_discovery_runs")
+    .select("actual_cost")
+    .eq("campaign_id", campaign.id)
+    .eq("owner_id", input.ownerId)
+    .gte("started_at", monthStart);
+
+  if (monthlyRunsError) {
+    throw new Error("Monthly sales budget usage could not be loaded: " + monthlyRunsError.message);
+  }
+
+  const monthlySpentBeforeRun = (monthlyRuns || []).reduce(
+    (sum, item) => sum + Number(item.actual_cost || 0),
+    0,
+  );
 
   const { data: run, error: runError } = await supabase
     .from("sales_discovery_runs")
@@ -134,6 +153,18 @@ export async function runSalesDiscoveryCampaign(input: {
 
   try {
     for (const query of queries) {
+      const projectedMonthlySpend =
+        monthlySpentBeforeRun + actualCost + conservativeCost;
+
+      if (
+        campaign.monthly_budget_hard_stop &&
+        projectedMonthlySpend > Number(campaign.monthly_budget_usd || 0)
+      ) {
+        partialReason =
+          "Campaign monthly budget hard-stop reached before the next SERP request.";
+        break;
+      }
+
       if (actualCost + conservativeCost > Number(campaign.max_run_cost_usd || 0)) {
         partialReason = "Campaign max run cost reached before the next SERP request.";
         break;
@@ -284,6 +315,10 @@ export async function runSalesDiscoveryCampaign(input: {
         result: {
           unique_candidates: seen.size,
           partial_reason: partialReason,
+          monthly_spent_before_run: monthlySpentBeforeRun,
+          monthly_spent_after_run: monthlySpentBeforeRun + actualCost,
+          monthly_budget_usd: Number(campaign.monthly_budget_usd || 0),
+          monthly_budget_hard_stop: Boolean(campaign.monthly_budget_hard_stop),
         },
         completed_at: new Date().toISOString(),
       })
@@ -308,6 +343,9 @@ export async function runSalesDiscoveryCampaign(input: {
       leadsLinked,
       actualCost,
       partialReason,
+      monthlySpentBeforeRun,
+      monthlySpentAfterRun: monthlySpentBeforeRun + actualCost,
+      monthlyBudget: Number(campaign.monthly_budget_usd || 0),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sales discovery failed.";
