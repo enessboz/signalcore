@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleRankRuns } from "@/lib/runtime/recovery";
 import {
   isTrackedKeywordDue,
   runRankTrackingBatch,
@@ -41,6 +43,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:rank-tracker",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another rank tracker invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleRuns = await recoverStaleRankRuns(supabase);
 
   const { data: autoSettings, error: settingsError } = await supabase
     .from("rank_tracking_settings")
@@ -171,6 +188,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
+    recovered_stale_runs: recoveredStaleRuns,
     seed_results: seedResults,
     active_keywords_checked: activeRows?.length || 0,
     due_keywords: due.length,
