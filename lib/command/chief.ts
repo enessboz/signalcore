@@ -25,6 +25,8 @@ type ChiefAction = {
     | "run_rank_tracking"
     | "configure_opportunity_engine"
     | "run_opportunity_scan"
+    | "record_seo_intervention"
+    | "evaluate_seo_intervention"
     | "create_sales_campaign"
     | "run_sales_campaign"
     | "qualify_sales_campaign"
@@ -102,6 +104,25 @@ type ChiefAction = {
   scan_ga4: boolean | null;
   scan_rank: boolean | null;
   opportunity_cadence: "daily" | "weekly" | null;
+  intervention_title: string | null;
+  intervention_type:
+    | "content"
+    | "title_meta"
+    | "internal_links"
+    | "technical"
+    | "schema"
+    | "site_structure"
+    | "migration"
+    | "other"
+    | null;
+  implemented_at: string | null;
+  intervention_scope: "targeted" | "project" | null;
+  intervention_urls: string[];
+  intervention_queries: string[];
+  intervention_hypothesis: string | null;
+  intervention_notes: string | null;
+  intervention_ref: string | null;
+  checkpoint_days: 7 | 14 | 28 | null;
 };
 
 export type ChiefPlan = {
@@ -209,6 +230,16 @@ const actionSchema = {
     "scan_ga4",
     "scan_rank",
     "opportunity_cadence",
+    "intervention_title",
+    "intervention_type",
+    "implemented_at",
+    "intervention_scope",
+    "intervention_urls",
+    "intervention_queries",
+    "intervention_hypothesis",
+    "intervention_notes",
+    "intervention_ref",
+    "checkpoint_days",
   ],
   properties: {
     type: {
@@ -239,6 +270,8 @@ const actionSchema = {
         "run_rank_tracking",
         "configure_opportunity_engine",
         "run_opportunity_scan",
+        "record_seo_intervention",
+        "evaluate_seo_intervention",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
@@ -383,6 +416,43 @@ const actionSchema = {
       type: ["string", "null"],
       enum: ["daily", "weekly", null],
     },
+    intervention_title: { type: ["string", "null"] },
+    intervention_type: {
+      type: ["string", "null"],
+      enum: [
+        "content",
+        "title_meta",
+        "internal_links",
+        "technical",
+        "schema",
+        "site_structure",
+        "migration",
+        "other",
+        null,
+      ],
+    },
+    implemented_at: { type: ["string", "null"] },
+    intervention_scope: {
+      type: ["string", "null"],
+      enum: ["targeted", "project", null],
+    },
+    intervention_urls: {
+      type: "array",
+      maxItems: 100,
+      items: { type: "string" },
+    },
+    intervention_queries: {
+      type: "array",
+      maxItems: 100,
+      items: { type: "string" },
+    },
+    intervention_hypothesis: { type: ["string", "null"] },
+    intervention_notes: { type: ["string", "null"] },
+    intervention_ref: { type: ["string", "null"] },
+    checkpoint_days: {
+      type: ["integer", "null"],
+      enum: [7, 14, 28, null],
+    },
   },
 };
 
@@ -435,7 +505,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180/480-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. You may configure project Rank Tracking, add explicit tracked keywords, seed a cost-controlled keyword universe from the GSC warehouse, and run rank checks. Rank checks are paid SERP operations and must remain subject to project SERP budget hard stops. You may configure or manually run the deterministic Opportunity Engine over GSC/GA4/rank evidence. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180/480-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. You may configure project Rank Tracking, add explicit tracked keywords, seed a cost-controlled keyword universe from the GSC warehouse, and run rank checks. Rank checks are paid SERP operations and must remain subject to project SERP budget hard stops. You may configure or manually run the deterministic Opportunity Engine over GSC/GA4/rank evidence. You may record an explicitly described SEO intervention and create D+7/D+14/D+28 monitoring checkpoints. Only use intervention URLs, queries, dates, notes and hypotheses the user actually supplied or that are unambiguous from the current request; do not invent change details. For evaluate_seo_intervention, resolve an existing intervention by title/id and use checkpoint_days 7, 14 or 28. Intervention evaluation is an internal first-party measurement action and must describe post-change association, never causality. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
