@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
 import { startQueuedCrawl } from "@/lib/crawl/distributed";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,39 +22,23 @@ export async function runTechnicalCrawl(projectId: string, formData: FormData) {
   if (!ownerId) redirect("/login");
 
   try {
-    if (maxUrls > 500) {
-      const result = await startQueuedCrawl({
-        client: supabase,
-        ownerId,
-        projectId,
-        maxUrls,
-        crawlType: "http",
-        batchSize: 50,
-        minDelayMs: 250,
-        respectRobots: true,
-        jsRenderMode,
-        pagespeedEnabled,
-        pagespeedSampleSize: pagespeedEnabled ? 20 : 0,
-      });
-
-      redirect(
-        `/projects/${projectId}/technical?run=${result.runId}&message=${encodeURIComponent(
-          `Distributed crawl queued: ${maxUrls.toLocaleString("en-US")} URL ceiling`,
-        )}`,
-      );
-    }
-
-    const result = await runProjectCrawl({
+    const result = await startQueuedCrawl({
+      client: supabase,
       ownerId,
       projectId,
       maxUrls,
       crawlType: "http",
+      batchSize: 50,
+      minDelayMs: 250,
+      respectRobots: true,
       jsRenderMode,
+      pagespeedEnabled,
+      pagespeedSampleSize: pagespeedEnabled ? 20 : 0,
     });
 
     redirect(
       `/projects/${projectId}/technical?run=${result.runId}&message=${encodeURIComponent(
-        `Crawl completed: ${String(result.summary.pages_crawled || 0)} pages`,
+        `Distributed crawl queued: ${maxUrls.toLocaleString("en-US")} URL ceiling`,
       )}`,
     );
   } catch (error) {
