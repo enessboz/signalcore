@@ -107,6 +107,8 @@ export async function sendChiefCommand(formData: FormData) {
         "schedule_agent_task",
         "manage_schedule",
         "request_report",
+        "run_technical_audit",
+        "run_prospect_audit",
       ],
       safety: {
         external_impact_requires_approval: true,
