@@ -566,3 +566,20 @@ button, input, textarea { font: inherit; }
   .syncControlGrid, .syncStatusPanel { grid-template-columns: 1fr; }
   .syncBackfillForm { align-items: stretch; flex-direction: column; }
 }
+
+.profileAssignmentList { display: grid; margin-top: 12px; }
+.profileAssignmentRow { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.profileAssignmentRow > div { display: grid; gap: 2px; }
+.profileAssignmentRow strong { font-size: 9px; }
+.profileAssignmentRow span, .profileAssignmentRow small { color: var(--muted); font-size: 8px; }
+.profileGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
+.profileCard { border: 1px solid var(--line); background: white; border-radius: 11px; padding: 13px; }
+.profileCard.inactive { opacity: .55; }
+.profileCardTop { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.profileCard h3 { margin: 3px 0 0; font-size: 11px; }
+.profileCard > p { color: var(--muted); font-size: 8px; line-height: 1.5; min-height: 36px; }
+.profileCard pre { max-height: 260px; overflow: auto; white-space: pre-wrap; background: #f8f9fb; border: 1px solid var(--line); border-radius: 8px; padding: 9px; color: #475467; font-size: 7px; line-height: 1.45; }
+.profileBadges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: end; }
+.profileCard form { margin: 0; }
+@media (max-width: 1000px) { .profileGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 640px) { .profileGrid { grid-template-columns: 1fr; } }
