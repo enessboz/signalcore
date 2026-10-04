@@ -21,10 +21,10 @@ type AgentDefinition = {
 
 function configuredModel(definition: AgentDefinition) {
   if (definition.model_class === "reasoning") {
-    return process.env.OPENAI_REASONING_MODEL || definition.default_model || "gpt-6-sol";
+    return process.env.OPENAI_REASONING_MODEL || definition.default_model || "gpt-6.1-sol";
   }
   if (definition.model_class === "coding") {
-    return process.env.OPENAI_CODING_MODEL || definition.default_model || "gpt-6-sol";
+    return process.env.OPENAI_CODING_MODEL || definition.default_model || "gpt-6.1-sol";
   }
   return process.env.OPENAI_ROUTINE_MODEL || definition.default_model || "gpt-6-luna";
 }
