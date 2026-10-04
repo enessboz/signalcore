@@ -6,6 +6,7 @@ import {
 } from "@/lib/agents/openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { fetchGithubRepositoryContext } from "@/lib/github/read-context";
 
 type AgentDefinition = {
   agent_key: string;
@@ -196,6 +197,17 @@ export async function executeAgentTask(input: {
   }
 
   const model = configuredModel(target);
+  let specialistContext = projectPrompt;
+
+  if (target.agent_key === "developer" && context.repositories.length) {
+    const repositoryContext = await fetchGithubRepositoryContext(
+      context.repositories[0].repo_full_name,
+    );
+    specialistContext +=
+      "\n\nDEVELOPER REPOSITORY CONTEXT:\n" +
+      JSON.stringify(repositoryContext, null, 2);
+  }
+
   const runId = await createRun({
     ownerId: input.ownerId,
     projectId: input.projectId,
@@ -213,7 +225,7 @@ export async function executeAgentTask(input: {
       model,
       instructions: target.instructions,
       request: input.userRequest,
-      projectContext: projectPrompt,
+      projectContext: specialistContext,
     });
 
     await finishRun({
