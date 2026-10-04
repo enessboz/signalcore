@@ -9,7 +9,7 @@ import {
   type GscRow,
 } from "@/lib/google/search-console";
 import { createClient } from "@/lib/supabase/server";
-import { saveGscView } from "./actions";
+import { runGscOpportunityScan, saveGscView } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -196,7 +196,12 @@ export default async function SearchConsolePage({
             Explore first-party GSC data manually. Automation and Opportunity Engine will use the same property separately.
           </p>
         </div>
-        <Link href={`/projects/${id}`} className="ghostButton">Back to project</Link>
+        <div className="buttonRow">
+          <form action={runGscOpportunityScan.bind(null, id)}>
+            <button className="primaryButton" type="submit" disabled={!resource}>Run Opportunity Scan</button>
+          </form>
+          <Link href={`/projects/${id}`} className="ghostButton">Back to project</Link>
+        </div>
       </header>
 
       <ProjectDataNav projectId={id} active="gsc" />
@@ -384,6 +389,21 @@ export default async function SearchConsolePage({
             ) : (
               <div className="emptyState smallEmpty"><span>No trend data yet.</span></div>
             )}
+          </section>
+
+          <section className="panel">
+            <div className="panelHeader"><div><h2>Rule Engine</h2><p>Deterministic first-pass opportunity detection.</p></div></div>
+            <div className="ruleList">
+              <span>Striking-distance queries</span>
+              <span>High-impression / low-CTR queries</span>
+              <span>Rising and declining queries</span>
+              <span>New and lost visibility queries</span>
+              <span>Declining landing pages</span>
+              <span>Multiple pages ranking for one query</span>
+            </div>
+            <form action={runGscOpportunityScan.bind(null, id)}>
+              <button className="primaryButton fullButton" type="submit" disabled={!resource}>Run 28-day Opportunity Scan</button>
+            </form>
           </section>
 
           <section className="panel">
