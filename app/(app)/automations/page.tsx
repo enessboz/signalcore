@@ -38,6 +38,8 @@ export default async function AutomationsPage({
     { data: scheduledTasks },
     { data: syncStates },
     { data: syncQueue },
+    { data: salesCampaigns },
+    { data: salesRuns },
   ] = await Promise.all([
     supabase.from("projects").select("id,name,domain").order("name"),
     supabase
@@ -75,6 +77,16 @@ export default async function AutomationsPage({
       .select("id,project_id,source,mode,start_date,end_date,cursor_date,status,result,error,created_at,completed_at")
       .order("created_at", { ascending: false })
       .limit(40),
+    supabase
+      .from("sales_campaigns")
+      .select("id,name,status,auto_discovery_enabled,schedule_kind,schedule_config,timezone,auto_qualify_count,last_auto_run_at,last_auto_status,last_auto_error,auto_failure_count")
+      .eq("auto_discovery_enabled", true)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("sales_discovery_runs")
+      .select("id,campaign_id,status,queries_completed,queries_requested,candidates_seen,leads_created,actual_cost,started_at,completed_at,error")
+      .order("started_at", { ascending: false })
+      .limit(20),
   ]);
 
   const projectMap = new Map((projects || []).map((project) => [project.id, project]));
@@ -90,6 +102,10 @@ export default async function AutomationsPage({
   const queuedSync = (syncQueue || []).filter((job) => ["queued","running"].includes(job.status)).length;
   const workerReady = Boolean(process.env.SUPABASE_SECRET_KEY && process.env.CRON_SECRET);
   const agentReady = Boolean(process.env.OPENAI_API_KEY && workerReady);
+  const salesWorkerReady = Boolean(
+    workerReady && process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
+  );
+  const automatedSalesCampaigns = salesCampaigns?.length || 0;
 
   return (
     <div className="page">
@@ -127,6 +143,11 @@ export default async function AutomationsPage({
           <span>Google sync queue</span>
           <strong>{queuedSync}</strong>
           <small>{workerReady ? "Worker credentials ready" : "Background sync paused"}</small>
+        </article>
+        <article className="healthCard">
+          <span>Sales discovery</span>
+          <strong>{automatedSalesCampaigns}</strong>
+          <small>{salesWorkerReady ? "Worker ready" : "Worker paused / provider missing"}</small>
         </article>
         <article className="healthCard">
           <span>Running / queued jobs</span>
@@ -223,6 +244,59 @@ export default async function AutomationsPage({
         )}
       </section>
 
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Sales discovery automation</h2>
+            <p>Deterministic SERP discovery and optional homepage qualification. No outreach is sent automatically.</p>
+          </div>
+          <Link href="/sales" className="secondaryButton">Open Sales</Link>
+        </div>
+
+        {(salesCampaigns || []).length ? (
+          <div className="automationTaskList">
+            {(salesCampaigns || []).map((campaign) => {
+              const latestRun = (salesRuns || []).find((run) => run.campaign_id === campaign.id);
+              return (
+                <article className="automationTaskCard" key={campaign.id}>
+                  <div className="automationTaskTop">
+                    <div>
+                      <p className="eyebrow">Sales discovery</p>
+                      <h3>{campaign.name}</h3>
+                    </div>
+                    <span className={"jobStatus job-" + campaign.last_auto_status}>
+                      {campaign.last_auto_status}
+                    </span>
+                  </div>
+                  <p>
+                    {campaign.schedule_kind
+                      ? scheduleDescription(
+                          campaign.schedule_kind as ScheduleKind,
+                          (campaign.schedule_config || {}) as ScheduleConfig,
+                          campaign.timezone || "Europe/Istanbul",
+                        )
+                      : "Schedule missing"}
+                  </p>
+                  <div className="automationTaskMeta">
+                    <span>Auto qualify: {campaign.auto_qualify_count || 0}</span>
+                    <span>Last auto run: {formatDate(campaign.last_auto_run_at)}</span>
+                    <span>Failures: {campaign.auto_failure_count || 0}</span>
+                    {latestRun ? <span>Latest cost: {"$" + Number(latestRun.actual_cost || 0).toFixed(4)}</span> : null}
+                  </div>
+                  {campaign.last_auto_error ? (
+                    <p className="formMessage formError">{campaign.last_auto_error}</p>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="emptyState smallEmpty">
+            <span>No Sales campaigns have background discovery enabled.</span>
+          </div>
+        )}
+      </section>
+
       <div className="twoCol dataTwoCol">
         <section className="panel">
           <div className="panelHeader">
@@ -282,6 +356,7 @@ export default async function AutomationsPage({
               <div><span>Google connection</span><strong>{google?.status || "disconnected"}</strong></div>
               <div><span>Agent scheduler</span><strong>{agentReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Data sync worker</span><strong>{workerReady ? "ready to activate" : "paused"}</strong></div>
+              <div><span>Sales discovery worker</span><strong>{salesWorkerReady ? "ready to activate" : "paused"}</strong></div>
               <div><span>Failed manual jobs</span><strong>{failedJobs}</strong></div>
             </div>
             <div className="buttonRow">
