@@ -32,6 +32,9 @@ create index if not exists agent_uat_runs_project_agent_idx
 create index if not exists agent_uat_runs_project_owner_fk_idx
   on public.agent_uat_runs(project_id,owner_id);
 
+create index if not exists agent_uat_runs_agent_run_fk_idx
+  on public.agent_uat_runs(agent_run_id);
+
 alter table public.agent_uat_runs enable row level security;
 
 grant select,insert,update,delete on public.agent_uat_runs to authenticated;
