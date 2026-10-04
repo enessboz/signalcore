@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type ReadinessItem = {
   label: string;
@@ -132,6 +133,61 @@ export default async function ReadinessPage() {
   const rankWorkerReady = deterministicWorkerReady && dataForSeoReady;
   const opportunityWorkerReady = deterministicWorkerReady;
   const interventionWorkerReady = deterministicWorkerReady;
+  let runtimeHealth = {
+    activeLeases: 0,
+    queuedSyncJobs: 0,
+    runningSyncJobs: 0,
+    failedSyncJobs: 0,
+    staleGoogleSync: 0,
+    staleCrawls: 0,
+    staleAgentTasks: 0,
+    staleRankRuns: 0,
+  };
+
+  if (supabaseWorkerReady) {
+    const admin = createAdminClient();
+    const nowIso = new Date().toISOString();
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60_000).toISOString();
+
+    const [
+      { count: activeLeases },
+      { count: queuedSyncJobs },
+      { count: runningSyncJobs },
+      { count: failedSyncJobs },
+      { count: staleGoogleSync },
+      { count: staleCrawls },
+      { count: staleAgentTasks },
+      { count: staleRankRuns },
+    ] = await Promise.all([
+      admin.from("runtime_leases").select("lease_key", { count: "exact", head: true }).gt("lease_until", nowIso),
+      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "queued"),
+      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "running"),
+      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "failed"),
+      admin.from("google_sync_queue").select("id", { count: "exact", head: true }).eq("status", "running").lt("started_at", tenMinutesAgo),
+      admin.from("technical_crawl_schedules").select("id", { count: "exact", head: true }).eq("status", "running").lt("updated_at", fifteenMinutesAgo),
+      admin.from("scheduled_tasks").select("id", { count: "exact", head: true }).eq("status", "running").lt("updated_at", fifteenMinutesAgo),
+      admin.from("rank_tracking_runs").select("id", { count: "exact", head: true }).eq("status", "running").lt("started_at", fifteenMinutesAgo),
+    ]);
+
+    runtimeHealth = {
+      activeLeases: activeLeases || 0,
+      queuedSyncJobs: queuedSyncJobs || 0,
+      runningSyncJobs: runningSyncJobs || 0,
+      failedSyncJobs: failedSyncJobs || 0,
+      staleGoogleSync: staleGoogleSync || 0,
+      staleCrawls: staleCrawls || 0,
+      staleAgentTasks: staleAgentTasks || 0,
+      staleRankRuns: staleRankRuns || 0,
+    };
+  }
+
+  const staleWorkerCount =
+    runtimeHealth.staleGoogleSync +
+    runtimeHealth.staleCrawls +
+    runtimeHealth.staleAgentTasks +
+    runtimeHealth.staleRankRuns;
+
   const totalScheduled =
     (activeSchedules || 0) +
     (activeTechnicalSchedules || 0) +
@@ -177,6 +233,15 @@ export default async function ReadinessPage() {
         : "SUPABASE_SECRET_KEY and CRON_SECRET are required. Background workers remain intentionally paused.",
       actionHref: "/automations",
       actionLabel: "Automations",
+    },
+    {
+      label: "Runtime concurrency guard",
+      ready: deterministicWorkerReady && staleWorkerCount === 0,
+      detail: deterministicWorkerReady
+        ? `${runtimeHealth.activeLeases} active worker lease(s) · ${staleWorkerCount} stale worker state(s). Expired leases and interrupted jobs recover automatically.`
+        : "Worker lease and stale-run recovery activate with the server worker credential.",
+      actionHref: "/automations",
+      actionLabel: "Runtime health",
     },
   ];
 
@@ -338,6 +403,21 @@ export default async function ReadinessPage() {
           <span>Repo bindings</span>
           <strong>{repositoryBindings || 0}</strong>
           <small>Developer context</small>
+        </article>
+        <article className="healthCard">
+          <span>Warehouse queue</span>
+          <strong>{runtimeHealth.queuedSyncJobs + runtimeHealth.runningSyncJobs}</strong>
+          <small>{runtimeHealth.queuedSyncJobs} queued · {runtimeHealth.runningSyncJobs} running · {runtimeHealth.failedSyncJobs} failed</small>
+        </article>
+        <article className="healthCard">
+          <span>Runtime leases</span>
+          <strong>{runtimeHealth.activeLeases}</strong>
+          <small>Concurrent worker protection</small>
+        </article>
+        <article className="healthCard">
+          <span>Stale workers</span>
+          <strong className={staleWorkerCount ? "healthBad" : "healthGood"}>{staleWorkerCount}</strong>
+          <small>Auto-recovery candidates</small>
         </article>
       </section>
 
