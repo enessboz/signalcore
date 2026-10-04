@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { executeAgentTask } from "@/lib/agents/runtime";
 import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleScheduledTasks } from "@/lib/runtime/recovery";
 import { createReportingOutput, type OutputFormat } from "@/lib/outputs/reporting";
 
 export const runtime = "nodejs";
@@ -30,6 +32,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:agent-scheduler",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another agent scheduler invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleTasks = await recoverStaleScheduledTasks(supabase);
   const { data: tasks, error } = await supabase
     .from("scheduled_tasks")
     .select("id,owner_id,project_id,title,instruction,target_agent_key,schedule_kind,schedule_config,post_run_config,timezone,status,last_run_at,failure_count")
@@ -182,6 +199,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
+    recovered_stale_tasks: recoveredStaleTasks,
     checked: tasks?.length || 0,
     due: due.length,
     processed: results.length,
