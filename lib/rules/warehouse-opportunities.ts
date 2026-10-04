@@ -35,6 +35,40 @@ type GscOpportunityPayload = {
   pages?: PageComparison[];
 };
 
+type QueryOwnershipSplit = {
+  query: string;
+  page_count: number;
+  total_impressions: number;
+  total_clicks: number;
+  top_page: string;
+  top_page_share: number;
+  top_pages: Array<{
+    page: string;
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    position: number;
+    share: number;
+  }>;
+};
+
+type QueryUrlSwitch = {
+  query: string;
+  previous_top_page: string;
+  current_top_page: string;
+  previous_total_impressions: number;
+  current_total_impressions: number;
+  previous_top_page_position: number;
+  current_top_page_position: number;
+};
+
+type GscQueryPageInsightPayload = {
+  available?: boolean;
+  period?: Record<string, string | null>;
+  ownership_splits?: QueryOwnershipSplit[];
+  url_switches?: QueryUrlSwitch[];
+};
+
 type Candidate = {
   findingType: FindingType;
   fingerprint: string;
@@ -360,6 +394,96 @@ function addGscPageCandidates(
   }
 }
 
+function addGscQueryPageCandidates(
+  payload: GscQueryPageInsightPayload | null,
+  candidates: Candidate[],
+) {
+  if (!payload) return;
+
+  for (const row of payload.ownership_splits || []) {
+    const impressions = number(row.total_impressions);
+    const topShare = number(row.top_page_share);
+    const pages = Array.isArray(row.top_pages) ? row.top_pages : [];
+
+    candidates.push({
+      findingType: "observation",
+      fingerprint: "gscqp:ownership-split:" + row.query,
+      title: "Query ownership is split across multiple URLs: " + row.query,
+      summary:
+        row.query +
+        " generated " +
+        impressions.toLocaleString() +
+        " impressions across " +
+        String(row.page_count) +
+        " URLs. The leading URL owns " +
+        (topShare * 100).toFixed(0) +
+        "% of current-period impressions.",
+      whyItMatters:
+        "Shared query visibility can be healthy when multiple URLs serve different intents, but a weak dominant owner can also signal internal competition or unclear page targeting.",
+      importance: importanceFromVolume(impressions, number(row.total_clicks)),
+      confidence: "high",
+      recommendedAction:
+        "Compare the top URLs for intent, canonical/indexability, internal links, titles/H1s and content overlap. Consolidate only if the URLs are genuinely competing for the same intent.",
+      affectedScope: {
+        query: row.query,
+        top_page: row.top_page,
+        top_page_share: topShare,
+        top_pages: pages,
+      },
+      metadata: {
+        source: "gsc_query_page_warehouse",
+        rule: "query_ownership_split",
+        page_count: row.page_count,
+        total_impressions: impressions,
+      },
+    });
+  }
+
+  for (const row of payload.url_switches || []) {
+    const currentImpressions = number(row.current_total_impressions);
+    const previousImpressions = number(row.previous_total_impressions);
+    const currentPosition = number(row.current_top_page_position);
+    const previousPosition = number(row.previous_top_page_position);
+    const positionDelta = currentPosition - previousPosition;
+
+    candidates.push({
+      findingType: positionDelta >= 5 ? "regression" : "observation",
+      fingerprint: "gscqp:url-switch:" + row.query,
+      title: "Dominant ranking URL changed: " + row.query,
+      summary:
+        "The leading GSC URL for " +
+        row.query +
+        " changed from " +
+        row.previous_top_page +
+        " to " +
+        row.current_top_page +
+        ".",
+      whyItMatters:
+        "A dominant URL switch can reflect intentional page replacement, changing search intent, technical changes or unstable ownership between similar pages.",
+      importance: importanceFromVolume(
+        Math.max(currentImpressions, previousImpressions),
+      ),
+      confidence: "high",
+      recommendedAction:
+        "Compare both URLs' intent, canonical/indexability, internal links and content overlap. Treat the switch as a regression only after validating whether the new owner is actually worse for the query.",
+      affectedScope: {
+        query: row.query,
+        previous_top_page: row.previous_top_page,
+        current_top_page: row.current_top_page,
+        previous_total_impressions: previousImpressions,
+        current_total_impressions: currentImpressions,
+        previous_top_page_position: previousPosition,
+        current_top_page_position: currentPosition,
+      },
+      metadata: {
+        source: "gsc_query_page_warehouse",
+        rule: "dominant_url_switch",
+        position_delta: positionDelta,
+      },
+    });
+  }
+}
+
 function addGa4Candidates(
   summary: Record<string, unknown> | null,
   candidates: Candidate[],
@@ -619,6 +743,7 @@ export async function detectWarehouseOpportunities(input: {
   const supabase = input.client || (await createClient());
   const candidates: Candidate[] = [];
   let gscPayload: GscOpportunityPayload | null = null;
+  let gscQueryPagePayload: GscQueryPageInsightPayload | null = null;
   let ga4Payload: Record<string, unknown> | null = null;
 
   if (input.scanGsc !== false) {
@@ -634,6 +759,24 @@ export async function detectWarehouseOpportunities(input: {
     const pages = gscPayload?.pages || [];
     addGscQueryCandidates(queries, candidates);
     addGscPageCandidates(pages, candidates);
+
+    const { data: queryPageData, error: queryPageError } = await supabase.rpc(
+      "get_gsc_query_page_insights",
+      {
+        p_project_id: input.projectId,
+        p_days: 28,
+        p_min_impressions: 100,
+        p_limit: 500,
+      },
+    );
+    if (queryPageError) {
+      throw new Error(
+        "GSC query-page insight dataset failed: " + queryPageError.message,
+      );
+    }
+    gscQueryPagePayload =
+      (queryPageData || {}) as GscQueryPageInsightPayload;
+    addGscQueryPageCandidates(gscQueryPagePayload, candidates);
   }
 
   if (input.scanGa4 !== false) {
@@ -717,11 +860,19 @@ export async function detectWarehouseOpportunities(input: {
     typeof gscPayload.period.current_end === "string"
       ? gscPayload.period.current_end
       : null;
+  const gscQueryPageDate =
+    gscQueryPagePayload?.period?.current_end &&
+    typeof gscQueryPagePayload.period.current_end === "string"
+      ? gscQueryPagePayload.period.current_end
+      : null;
   const ga4Period = (ga4Payload?.period || {}) as Record<string, unknown>;
   const ga4Date =
     typeof ga4Period.current_end === "string" ? ga4Period.current_end : null;
   const dataDate =
-    [gscDate, ga4Date].filter(Boolean).sort().slice(-1)[0] || null;
+    [gscDate, gscQueryPageDate, ga4Date]
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0] || null;
 
   return {
     candidates: ordered.length,
@@ -730,6 +881,7 @@ export async function detectWarehouseOpportunities(input: {
     low: ordered.filter((item) => item.importance === "low").length,
     dataDate,
     gscAvailable: Boolean(gscPayload?.available),
+    gscQueryPageAvailable: Boolean(gscQueryPagePayload?.available),
     ga4Available: Boolean(ga4Payload?.available),
   };
 }
