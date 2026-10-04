@@ -95,8 +95,10 @@ export async function createReportingOutput(input: {
     confidence?: string;
     findings?: Array<{
       title?: string;
+      finding_type?: "issue" | "opportunity" | "strategy_discovery" | "observation";
       why_it_matters?: string;
       recommended_action?: string;
+      evidence_refs?: string[];
     }>;
     next_actions?: string[];
   };
@@ -126,6 +128,75 @@ export async function createReportingOutput(input: {
       : "",
   ].filter(Boolean);
 
+
+  const profileRules = profile?.rules || {};
+  const allowedSlideTypes = Array.isArray(profileRules.allowed_slide_types)
+    ? profileRules.allowed_slide_types.map(String)
+    : [
+        "title",
+        "executive_summary",
+        "opportunity",
+        "technical_finding",
+        "roadmap",
+        "next_steps",
+      ];
+
+  function allowed(type: string, fallback: string) {
+    if (!profile?.strict_mode) return type;
+    if (allowedSlideTypes.includes(type)) return type;
+    if (allowedSlideTypes.includes(fallback)) return fallback;
+    return allowedSlideTypes[0] || fallback;
+  }
+
+  const presentationPlan =
+    input.format === "presentation"
+      ? [
+          {
+            slide_type: allowed("title", "executive_summary"),
+            title: project?.name || "Project",
+            key_message: output.summary || "Evidence-based project review",
+            bullets: [] as string[],
+            evidence_refs: [] as string[],
+          },
+          {
+            slide_type: allowed("executive_summary", "opportunity"),
+            title: "Executive Summary",
+            key_message: output.summary || "Current evidence and priorities",
+            bullets: (output.next_actions || []).slice(0, 3),
+            evidence_refs: [] as string[],
+          },
+          ...(output.findings || []).map((finding) => ({
+            slide_type:
+              finding.finding_type === "issue"
+                ? allowed("technical_finding", "opportunity")
+                : allowed("opportunity", "executive_summary"),
+            title: finding.title || "Finding",
+            key_message: finding.why_it_matters || "",
+            bullets: finding.recommended_action ? [finding.recommended_action] : [],
+            evidence_refs: finding.evidence_refs || [],
+          })),
+          {
+            slide_type: allowed("next_steps", "roadmap"),
+            title: "Next Steps",
+            key_message: "Recommended actions based on the evidence reviewed.",
+            bullets: output.next_actions || [],
+            evidence_refs: [] as string[],
+          },
+        ].filter((slide, index, all) => {
+          if (!slide.title) return false;
+          if (index === all.length - 1 && slide.bullets.length === 0) return false;
+          return true;
+        })
+      : null;
+
+  if (
+    profile?.strict_mode &&
+    presentationPlan &&
+    presentationPlan.some((slide) => !allowedSlideTypes.includes(slide.slide_type))
+  ) {
+    throw new Error("Presentation output violated the strict allowed slide-type profile.");
+  }
+
   const title =
     (project?.name || "Project") +
     " · " +
@@ -144,6 +215,30 @@ export async function createReportingOutput(input: {
       body_markdown: markdownParts.join("") || output.summary || "",
       data: {
         ...output,
+        deliverable_contract:
+          input.format === "presentation"
+            ? {
+                type: "presentation_slide_plan",
+                slides: presentationPlan,
+              }
+            : {
+                type: input.format,
+                sections: [
+                  output.summary
+                    ? { section_type: "summary", title: "Executive Summary", body: output.summary }
+                    : null,
+                  ...(output.findings || []).map((finding) => ({
+                    section_type: finding.finding_type || "finding",
+                    title: finding.title || "Finding",
+                    body: finding.why_it_matters || "",
+                    recommended_action: finding.recommended_action || null,
+                    evidence_refs: finding.evidence_refs || [],
+                  })),
+                  output.next_actions?.length
+                    ? { section_type: "next_actions", title: "Next Actions", items: output.next_actions }
+                    : null,
+                ].filter(Boolean),
+              },
         output_profile_rules: profile?.rules || null,
         output_profile_strict: profile?.strict_mode || false,
       },
