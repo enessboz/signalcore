@@ -1202,7 +1202,20 @@ export async function processQueuedCrawlBatch(input: {
   }
   const run = runData as CrawlRunRow;
   if (run.status !== "running") {
-    return { runId: run.id, processed: 0, status: run.status };
+    return {
+      runId: run.id,
+      processed: 0,
+      succeeded: 0,
+      retried: 0,
+      failed: 0,
+      skipped: 0,
+      newUrls: 0,
+      queuedRemaining: 0,
+      claimedRemaining: 0,
+      complete: true,
+      finalSummary: (run.summary || null) as Record<string, unknown> | null,
+      status: run.status,
+    };
   }
 
   const staleCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
