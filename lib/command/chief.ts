@@ -6,6 +6,8 @@ type ChiefAction = {
     | "schedule_agent_task"
     | "manage_schedule"
     | "request_report"
+    | "run_technical_audit"
+    | "run_prospect_audit"
     | "no_action";
   project_ref: string | null;
   project_type: "owned" | "client" | "lead_prospect" | null;
@@ -27,6 +29,7 @@ type ChiefAction = {
   timezone: string | null;
   schedule_status: "active" | "paused" | "cancelled" | null;
   report_format: "summary" | "document" | "presentation" | "task" | "email" | null;
+  max_urls: number | null;
 };
 
 export type ChiefPlan = {
@@ -85,6 +88,7 @@ const actionSchema = {
     "timezone",
     "schedule_status",
     "report_format",
+    "max_urls",
   ],
   properties: {
     type: {
@@ -96,6 +100,8 @@ const actionSchema = {
         "schedule_agent_task",
         "manage_schedule",
         "request_report",
+        "run_technical_audit",
+        "run_prospect_audit",
         "no_action",
       ],
     },
@@ -142,6 +148,7 @@ const actionSchema = {
       type: ["string", "null"],
       enum: ["summary", "document", "presentation", "task", "email", null],
     },
+    max_urls: { type: ["integer", "null"], minimum: 1, maximum: 500 },
   },
 };
 
