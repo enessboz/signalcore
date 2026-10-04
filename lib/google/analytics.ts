@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getGoogleAccessToken } from "@/lib/google/access-token";
 
 export type Ga4Filter = {
@@ -53,8 +54,8 @@ function dimensionFilterExpression(filters: Ga4Filter[]) {
     : { andGroup: { expressions } };
 }
 
-export async function runGa4Report(input: Ga4RunReportInput) {
-  const { accessToken } = await getGoogleAccessToken();
+export async function runGa4Report(input: Ga4RunReportInput, client?: SupabaseClient) {
+  const { accessToken } = await getGoogleAccessToken(client);
 
   const body: Record<string, unknown> = {
     dateRanges: [{ startDate: input.startDate, endDate: input.endDate }],
@@ -118,8 +119,8 @@ export async function runGa4Funnel(input: {
   steps: FunnelStepInput[];
   breakdownDimension?: string;
   isOpenFunnel?: boolean;
-}) {
-  const { accessToken } = await getGoogleAccessToken();
+}, client?: SupabaseClient) {
+  const { accessToken } = await getGoogleAccessToken(client);
 
   const body: Record<string, unknown> = {
     dateRanges: [{ startDate: input.startDate, endDate: input.endDate }],
