@@ -451,3 +451,7 @@ button, input, textarea { font: inherit; }
   .commandComposerFoot { align-items: stretch; flex-direction: column; }
   .commandComposerFoot button { width: 100%; }
 }
+
+.teamHandoffActions { display: flex; gap: 6px; margin-top: 5px; }
+.teamHandoffActions form { margin: 0; }
+.teamHandoffActions button { padding: 6px 8px; font-size: 8px; }
