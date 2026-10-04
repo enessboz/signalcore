@@ -517,3 +517,31 @@ button, input, textarea { font: inherit; }
   .approvalDetails { grid-template-columns: 1fr; }
   .approvalActions > span { width: 100%; margin-left: 0; }
 }
+
+.readinessHero { border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; display: grid; gap: 2px; min-width: 145px; }
+.readinessHero strong { font-size: 14px; }
+.readinessHero span { font-size: 8px; color: var(--muted); }
+.readinessHeroReady { background: #f6fef9; border-color: #a6f4c5; }
+.readinessHeroReady strong { color: #067647; }
+.readinessHeroWarn { background: #fffcf5; border-color: #fedf89; }
+.readinessHeroWarn strong { color: #b54708; }
+.readinessList { display: grid; }
+.readinessRow { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+.readinessIcon { width: 27px; height: 27px; border-radius: 999px; display: grid; place-items: center; font-size: 9px; font-weight: 800; }
+.readinessReady { background: #ecfdf3; color: #067647; }
+.readinessRequired { background: #fff1f2; color: #b42318; }
+.readinessOptional { background: #eef4ff; color: #3538cd; }
+.readinessCopy { display: grid; gap: 3px; min-width: 0; }
+.readinessCopy strong { font-size: 9px; }
+.readinessCopy span { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.readinessRowActions { display: grid; justify-items: end; gap: 5px; }
+.readinessRowActions a { font-size: 8px; font-weight: 650; }
+.readinessBadge { display: inline-flex; padding: 4px 6px; border-radius: 999px; font-size: 7px; font-weight: 700; text-transform: uppercase; }
+.readinessLaunchPanel { margin-top: 16px; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+.readinessLaunchPanel h2 { margin: 0 0 4px; font-size: 12px; }
+.readinessLaunchPanel p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; max-width: 760px; }
+@media (max-width: 720px) {
+  .readinessRow { grid-template-columns: 28px minmax(0,1fr); }
+  .readinessRowActions { grid-column: 2; justify-items: start; }
+  .readinessLaunchPanel { align-items: stretch; flex-direction: column; }
+}
