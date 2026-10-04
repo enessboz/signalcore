@@ -80,12 +80,57 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await processQueuedCrawlBatch({
-      client: supabase,
-      runId: target.id,
-    });
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + 235_000;
+    const totals = {
+      batches: 0,
+      processed: 0,
+      succeeded: 0,
+      retried: 0,
+      failed: 0,
+      skipped: 0,
+      newUrls: 0,
+      queuedRemaining: 0,
+      claimedRemaining: 0,
+      complete: false,
+    };
+    let finalSummary: Record<string, unknown> | null = null;
 
-    if (result.complete) {
+    while (Date.now() + 25_000 < deadlineAt && !totals.complete) {
+      const result = await processQueuedCrawlBatch({
+        client: supabase,
+        runId: target.id,
+        deadlineAt,
+      });
+
+      totals.batches += 1;
+      totals.processed += result.processed;
+      totals.succeeded += result.succeeded;
+      totals.retried += result.retried;
+      totals.failed += result.failed;
+      totals.skipped += result.skipped;
+      totals.newUrls += result.newUrls;
+      totals.queuedRemaining = result.queuedRemaining;
+      totals.claimedRemaining = result.claimedRemaining;
+      totals.complete = result.complete;
+      finalSummary = result.finalSummary;
+
+      if (
+        result.complete ||
+        (result.processed === 0 &&
+          result.queuedRemaining === 0 &&
+          result.claimedRemaining === 0)
+      ) {
+        break;
+      }
+
+      if (result.processed === 0 && result.queuedRemaining > 0) {
+        // Remaining URLs may be waiting for retry backoff. Avoid hot-looping.
+        break;
+      }
+    }
+
+    if (totals.complete) {
       const { data: completedRun } = await supabase
         .from("crawl_runs")
         .select("status")
@@ -110,27 +155,32 @@ export async function POST(request: NextRequest) {
       client: supabase,
       tracker: runtimeRun,
       status: summarizeWorkerStatus({
-        processed: Math.max(result.processed, 1),
-        failed: result.failed,
-        partial: result.retried,
+        processed: Math.max(totals.processed, 1),
+        failed: totals.failed,
+        partial: totals.retried,
       }),
       metrics: {
         run_id: target.id,
-        processed: result.processed,
-        succeeded: result.succeeded,
-        retried: result.retried,
-        failed: result.failed,
-        skipped: result.skipped,
-        new_urls: result.newUrls,
-        queued_remaining: result.queuedRemaining,
-        claimed_remaining: result.claimedRemaining,
-        complete: result.complete,
+        batches: totals.batches,
+        processed: totals.processed,
+        succeeded: totals.succeeded,
+        retried: totals.retried,
+        failed: totals.failed,
+        skipped: totals.skipped,
+        new_urls: totals.newUrls,
+        queued_remaining: totals.queuedRemaining,
+        claimed_remaining: totals.claimedRemaining,
+        complete: totals.complete,
+        elapsed_ms: Date.now() - startedAt,
       },
     });
 
     return NextResponse.json({
-      status: result.complete ? "completed" : "running",
-      ...result,
+      status: totals.complete ? "completed" : "running",
+      runId: target.id,
+      ...totals,
+      finalSummary,
+      elapsed_ms: Date.now() - startedAt,
       time: new Date().toISOString(),
     });
   } catch (runError) {
