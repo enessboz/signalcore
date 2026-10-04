@@ -64,6 +64,34 @@ async function resolveProject(
   return contains.length === 1 ? contains[0].id : null;
 }
 
+function chunkBackground(input: string, maxChars = 1500) {
+  const paragraphs = input
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length > maxChars && current) {
+      chunks.push(current);
+      current = paragraph;
+    } else if (paragraph.length > maxChars) {
+      if (current) chunks.push(current);
+      current = "";
+      for (let index = 0; index < paragraph.length; index += maxChars) {
+        chunks.push(paragraph.slice(index, index + maxChars));
+      }
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [input.slice(0, maxChars)];
+}
+
 export type CommandActionResult = {
   type: ChiefAction["type"];
   status: "completed" | "failed" | "skipped";
@@ -160,6 +188,41 @@ export async function executeChiefActions(input: {
         continue;
       }
 
+      if (action.type === "add_global_brain_entry") {
+        const title = action.entry_title?.trim();
+        const content = action.entry_content?.trim();
+        const category = action.brain_category || "rule";
+
+        if (!title || !content || content.length < 10) {
+          throw new Error("Global Brain entry needs a title and meaningful content.");
+        }
+
+        const { data: entry, error } = await supabase
+          .from("global_brain_entries")
+          .insert({
+            owner_id: input.ownerId,
+            category,
+            title,
+            content,
+            priority: Math.min(Math.max(action.priority ?? 80, 0), 100),
+            active: true,
+          })
+          .select("id,title")
+          .single();
+
+        if (error || !entry) {
+          throw new Error(error?.message || "Global Brain entry could not be created.");
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          summary: `Added Global Brain rule: ${entry.title}.`,
+          data: { entry_id: entry.id, category },
+        });
+        continue;
+      }
+
       const projectId = await resolveProject(
         input.ownerId,
         action.project_ref,
@@ -178,12 +241,166 @@ export async function executeChiefActions(input: {
           "run_serp_research",
           "set_google_auto_sync",
           "queue_google_backfill",
+          "add_project_background",
+          "assign_output_profile",
+          "set_budget_limit",
         ].includes(action.type) &&
         !projectId
       ) {
         throw new Error(
           `Project could not be resolved from "${action.project_ref || "empty reference"}".`,
         );
+      }
+
+      if (action.type === "add_project_background") {
+        const title = action.background_title?.trim() || "Chief Operator Background";
+        const content = action.background_content?.trim();
+        if (!content || content.length < 20) {
+          throw new Error("Project background needs at least 20 characters of user-supplied content.");
+        }
+
+        const { data: source, error: sourceError } = await supabase
+          .from("project_sources")
+          .insert({
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            source_type: "manual_background",
+            title,
+            content_text: content,
+            metadata: { source: "chief_operator", char_count: content.length },
+          })
+          .select("id")
+          .single();
+
+        if (sourceError || !source) {
+          throw new Error(sourceError?.message || "Project background could not be saved.");
+        }
+
+        const chunks = chunkBackground(content);
+        const { error: chunkError } = await supabase
+          .from("background_chunks")
+          .insert(
+            chunks.map((chunk, index) => ({
+              source_id: source.id,
+              project_id: projectId!,
+              owner_id: input.ownerId,
+              chunk_index: index,
+              content: chunk,
+              metadata: { char_count: chunk.length, source: "chief_operator" },
+            })),
+          );
+
+        if (chunkError) {
+          await supabase.from("project_sources").delete().eq("id", source.id);
+          throw new Error(chunkError.message);
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: `Added "${title}" to Project Brain with ${chunks.length} searchable chunk(s).`,
+          data: { source_id: source.id, chunks: chunks.length },
+        });
+        continue;
+      }
+
+      if (action.type === "assign_output_profile") {
+        const outputType = action.output_type;
+        const profileRef = action.output_profile_ref?.trim();
+        if (!outputType || !profileRef) {
+          throw new Error("Output type and output profile name/key are required.");
+        }
+
+        const { data: profiles } = await supabase
+          .from("output_profiles")
+          .select("id,profile_key,name,output_type")
+          .eq("owner_id", input.ownerId)
+          .eq("active", true)
+          .eq("output_type", outputType);
+
+        const normalized = profileRef.toLowerCase();
+        const matches = (profiles || []).filter(
+          (profile) =>
+            profile.profile_key.toLowerCase() === normalized ||
+            profile.name.toLowerCase() === normalized ||
+            profile.name.toLowerCase().includes(normalized),
+        );
+
+        if (matches.length !== 1) {
+          throw new Error(
+            matches.length
+              ? "Output profile reference is ambiguous."
+              : `No active ${outputType} profile matches "${profileRef}".`,
+          );
+        }
+
+        const { error } = await supabase.from("project_output_profiles").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            output_type: outputType,
+            profile_id: matches[0].id,
+          },
+          { onConflict: "project_id,output_type" },
+        );
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: `Assigned ${matches[0].name} as the project's ${outputType} profile.`,
+          data: { profile_id: matches[0].id, output_type: outputType },
+        });
+        continue;
+      }
+
+      if (action.type === "set_budget_limit") {
+        const category = action.budget_category;
+        const monthlyLimit = action.monthly_limit;
+        if (
+          !category ||
+          monthlyLimit === null ||
+          monthlyLimit < 0
+        ) {
+          throw new Error("Budget category and non-negative monthly limit are required.");
+        }
+
+        const warning = Math.min(
+          Math.max(action.soft_warning_percent ?? 80, 1),
+          100,
+        );
+
+        const { error } = await supabase.from("budget_limits").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            category,
+            monthly_limit: monthlyLimit,
+            soft_warning_percent: warning,
+            hard_stop: action.hard_stop ?? true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "project_id,category" },
+        );
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: `Set ${category.toUpperCase()} monthly budget to ${monthlyLimit.toFixed(2)} (${action.hard_stop ?? true ? "hard stop" : "warning only"}).`,
+          data: {
+            category,
+            monthly_limit: monthlyLimit,
+            soft_warning_percent: warning,
+            hard_stop: action.hard_stop ?? true,
+          },
+        });
+        continue;
       }
 
       if (action.type === "set_google_auto_sync") {
