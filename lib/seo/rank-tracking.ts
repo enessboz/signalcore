@@ -255,9 +255,31 @@ async function writeRankFinding(input: {
   }
 
   if (findings.length) {
-    const { error } = await input.supabase.from("findings").upsert(findings, {
-      onConflict: "project_id,fingerprint",
-    });
+    const fingerprints = findings.map((item) => String(item.fingerprint));
+    const { data: existingFindings, error: existingError } = await input.supabase
+      .from("findings")
+      .select("fingerprint,status")
+      .eq("project_id", keyword.project_id)
+      .eq("owner_id", keyword.owner_id)
+      .in("fingerprint", fingerprints);
+
+    if (existingError) {
+      throw new Error("Existing rank finding status lookup failed: " + existingError.message);
+    }
+
+    const statusByFingerprint = new Map(
+      (existingFindings || []).map((item) => [item.fingerprint, item.status]),
+    );
+
+    const { error } = await input.supabase.from("findings").upsert(
+      findings.map((item) => ({
+        ...item,
+        status: statusByFingerprint.get(String(item.fingerprint)) || "open",
+      })),
+      {
+        onConflict: "project_id,fingerprint",
+      },
+    );
     if (error) throw new Error("Rank findings could not be saved: " + error.message);
   }
 }
