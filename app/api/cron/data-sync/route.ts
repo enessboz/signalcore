@@ -4,6 +4,7 @@ import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { recoverStaleGoogleSyncJobs } from "@/lib/runtime/recovery";
 import { enqueueGoogleSync, processGoogleSyncJob } from "@/lib/google/sync";
 import { evaluateGoogleWarehouseHealth } from "@/lib/google/warehouse-health";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -121,6 +122,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: queueError.message }, { status: 500 });
   }
 
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "data-sync",
+    ownerIds: [
+      ...(bindings || []).map((item) => item.owner_id),
+      ...(jobs || []).map((item) => item.owner_id),
+    ],
+    metadata: {
+      queued_jobs_selected: jobs?.length || 0,
+      bindings_checked: bindings?.length || 0,
+    },
+  });
+
   const processed: Array<Record<string, unknown>> = [];
 
   for (const job of jobs || []) {
@@ -207,6 +221,29 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  const failedCount =
+    enqueueResults.filter((item) => Boolean(item.error)).length +
+    processed.filter((item) => Boolean(item.error)).length +
+    healthResults.filter((item) => Boolean(item.error)).length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(processed.length + enqueueResults.length, 1),
+      failed: failedCount,
+    }),
+    metrics: {
+      recovered_stale_jobs: recoveredStaleJobs,
+      bindings_checked: bindings?.length || 0,
+      enqueue_attempts: enqueueResults.length,
+      jobs_selected: jobs?.length || 0,
+      jobs_processed: processed.length,
+      failed_operations: failedCount,
+      elapsed_ms: Date.now() - startedAt,
+    },
+  });
 
   return NextResponse.json({
     recovered_stale_jobs: recoveredStaleJobs,
