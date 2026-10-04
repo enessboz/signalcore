@@ -66,6 +66,7 @@ export async function sendChiefCommand(formData: FormData) {
     { data: budgetLimits },
     { data: salesCampaigns },
     { data: salesLeads },
+    { data: technicalSchedules },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -123,6 +124,12 @@ export async function sendChiefCommand(formData: FormData) {
       .select("id,domain,company_name,country,industry,stage,qualification_status,score,converted_project_id,updated_at")
       .order("updated_at", { ascending: false })
       .limit(120),
+    supabase
+      .from("technical_crawl_schedules")
+      .select("id,project_id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error")
+      .neq("status", "cancelled")
+      .order("updated_at", { ascending: false })
+      .limit(80),
   ]);
 
   if (!chief || !["testing", "active"].includes(chief.status)) {
@@ -139,6 +146,7 @@ export async function sendChiefCommand(formData: FormData) {
       budget_limits: budgetLimits || [],
       sales_campaigns: salesCampaigns || [],
       sales_leads: salesLeads || [],
+      technical_crawl_schedules: technicalSchedules || [],
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
@@ -157,6 +165,8 @@ export async function sendChiefCommand(formData: FormData) {
         "assign_output_profile",
         "set_budget_limit",
         "convert_project_to_client",
+        "create_technical_crawl_schedule",
+        "manage_technical_crawl_schedule",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
