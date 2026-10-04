@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
 
 export const runtime = "nodejs";
@@ -21,6 +22,20 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:interventions",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another intervention monitor invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: checks, error } = await supabase
