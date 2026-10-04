@@ -5,6 +5,10 @@ import { enqueueGoogleSync } from "@/lib/google/sync";
 import { createReportingOutput } from "@/lib/outputs/reporting";
 import type { ChiefPlan } from "@/lib/command/chief";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
+import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
+import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForLead } from "@/lib/sales/prospect";
 
 type ChiefAction = ChiefPlan["actions"][number];
 
@@ -62,6 +66,76 @@ async function resolveProject(
   });
 
   return contains.length === 1 ? contains[0].id : null;
+}
+
+async function resolveSalesCampaign(
+  supabase: SupabaseClient,
+  ownerId: string,
+  ref: string | null,
+) {
+  if (!ref) return null;
+  const normalized = ref.trim().toLowerCase();
+
+  const { data: direct } = await supabase
+    .from("sales_campaigns")
+    .select("id,name")
+    .eq("owner_id", ownerId)
+    .eq("id", ref)
+    .maybeSingle();
+  if (direct?.id) return direct;
+
+  const { data: campaigns } = await supabase
+    .from("sales_campaigns")
+    .select("id,name")
+    .eq("owner_id", ownerId)
+    .neq("status", "archived");
+
+  const exact = (campaigns || []).filter(
+    (item) => item.name.trim().toLowerCase() === normalized,
+  );
+  if (exact.length === 1) return exact[0];
+
+  const contains = (campaigns || []).filter((item) =>
+    item.name.trim().toLowerCase().includes(normalized),
+  );
+  return contains.length === 1 ? contains[0] : null;
+}
+
+async function resolveSalesLead(
+  supabase: SupabaseClient,
+  ownerId: string,
+  ref: string | null,
+) {
+  if (!ref) return null;
+  const normalized = ref.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+
+  const { data: direct } = await supabase
+    .from("sales_leads")
+    .select("id,domain,company_name,stage,qualification_status,converted_project_id")
+    .eq("owner_id", ownerId)
+    .eq("id", ref)
+    .maybeSingle();
+  if (direct?.id) return direct;
+
+  const { data: leads } = await supabase
+    .from("sales_leads")
+    .select("id,domain,company_name,stage,qualification_status,converted_project_id")
+    .eq("owner_id", ownerId)
+    .limit(500);
+
+  const exact = (leads || []).filter((lead) => {
+    const domain = lead.domain?.trim().toLowerCase();
+    const name = lead.company_name?.trim().toLowerCase();
+    return domain === normalized || name === normalized;
+  });
+  if (exact.length === 1) return exact[0];
+
+  const contains = (leads || []).filter((lead) => {
+    const domain = lead.domain?.trim().toLowerCase() || "";
+    const name = lead.company_name?.trim().toLowerCase() || "";
+    return domain.includes(normalized) || name.includes(normalized);
+  });
+  return contains.length === 1 ? contains[0] : null;
 }
 
 function chunkBackground(input: string, maxChars = 1500) {
@@ -219,6 +293,265 @@ export async function executeChiefActions(input: {
           status: "completed",
           summary: `Added Global Brain rule: ${entry.title}.`,
           data: { entry_id: entry.id, category },
+        });
+        continue;
+      }
+
+      if (action.type === "create_sales_campaign") {
+        const name = action.campaign_name?.trim() || action.campaign_ref?.trim();
+        const queries = Array.from(
+          new Set((action.sales_queries || []).map((item) => item.trim()).filter(Boolean)),
+        ).slice(0, 20);
+
+        if (!name || !queries.length) {
+          throw new Error("Sales campaign needs a name and at least one discovery query.");
+        }
+
+        const existing = await resolveSalesCampaign(supabase, input.ownerId, name);
+        if (existing) {
+          results.push({
+            type: action.type,
+            status: "completed",
+            summary: "Sales campaign already exists: " + existing.name + ".",
+            data: { campaign_id: existing.id },
+          });
+          continue;
+        }
+
+        const { data: campaign, error } = await supabase
+          .from("sales_campaigns")
+          .insert({
+            owner_id: input.ownerId,
+            name,
+            status: "draft",
+            country: action.country || null,
+            industry: action.industry || null,
+            location_code: action.location_code || 2840,
+            language_code: action.language_code || "en",
+            queries,
+            exclusions: (action.exclusions || []).slice(0, 50),
+            depth: 20,
+            min_score: action.min_score ?? 65,
+            max_candidates: action.max_candidates ?? 100,
+            max_run_cost_usd: action.max_run_cost ?? 0.25,
+          })
+          .select("id,name")
+          .single();
+
+        if (error || !campaign) {
+          throw new Error(error?.message || "Sales campaign could not be created.");
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          summary: "Created Sales discovery campaign " + campaign.name + ".",
+          data: { campaign_id: campaign.id, queries: queries.length },
+        });
+        continue;
+      }
+
+      if (action.type === "run_sales_campaign") {
+        const campaign = await resolveSalesCampaign(
+          supabase,
+          input.ownerId,
+          action.campaign_ref || action.campaign_name,
+        );
+        if (!campaign) throw new Error("Sales campaign could not be uniquely resolved.");
+
+        const run = await runSalesDiscoveryCampaign({
+          ownerId: input.ownerId,
+          campaignId: campaign.id,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          summary:
+            "Sales discovery completed for " +
+            campaign.name +
+            ": " +
+            String(run.uniqueCandidates) +
+            " candidates, " +
+            String(run.leadsCreated) +
+            " new leads.",
+          data: {
+            campaign_id: campaign.id,
+            run_id: run.runId,
+            cost: run.actualCost,
+            unique_candidates: run.uniqueCandidates,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "qualify_sales_campaign") {
+        const campaign = await resolveSalesCampaign(
+          supabase,
+          input.ownerId,
+          action.campaign_ref || action.campaign_name,
+        );
+        if (!campaign) throw new Error("Sales campaign could not be uniquely resolved.");
+
+        const qualification = await qualifyTopCampaignLeads({
+          ownerId: input.ownerId,
+          campaignId: campaign.id,
+          limit: action.auto_qualify_count || 10,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          summary:
+            "Qualified " +
+            String(qualification.succeeded) +
+            "/" +
+            String(qualification.requested) +
+            " top leads for " +
+            campaign.name +
+            ".",
+          data: { campaign_id: campaign.id, ...qualification },
+        });
+        continue;
+      }
+
+      if (action.type === "configure_sales_automation") {
+        const campaign = await resolveSalesCampaign(
+          supabase,
+          input.ownerId,
+          action.campaign_ref || action.campaign_name,
+        );
+        if (!campaign) throw new Error("Sales campaign could not be uniquely resolved.");
+
+        const enabled = action.enabled ?? true;
+        const kind = action.schedule_kind;
+        if (enabled && (!kind || kind === "once" || !action.time_local)) {
+          throw new Error("Sales automation requires daily/weekly/monthly cadence and local time.");
+        }
+        if (enabled && kind === "weekly" && !(action.days_of_week || []).length) {
+          throw new Error("Weekly Sales automation requires days_of_week.");
+        }
+
+        const scheduleConfig = {
+          time_local: action.time_local,
+          days_of_week: kind === "weekly" ? action.days_of_week || [] : [],
+          day_of_month: kind === "monthly" ? action.day_of_month || 1 : null,
+        };
+
+        const { error } = await supabase
+          .from("sales_campaigns")
+          .update({
+            auto_discovery_enabled: enabled,
+            schedule_kind: kind === "once" ? null : kind,
+            schedule_config: scheduleConfig,
+            timezone: action.timezone || "Europe/Istanbul",
+            auto_qualify_count: Math.min(Math.max(action.auto_qualify_count || 0, 0), 10),
+            last_auto_status: enabled ? "idle" : "paused",
+            last_auto_error: null,
+            status: enabled ? "active" : undefined,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", campaign.id)
+          .eq("owner_id", input.ownerId);
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          summary:
+            "Sales automation " +
+            (enabled ? "enabled" : "disabled") +
+            " for " +
+            campaign.name +
+            ".",
+          data: {
+            campaign_id: campaign.id,
+            enabled,
+            schedule: scheduleConfig,
+          },
+        });
+        continue;
+      }
+
+      if (
+        ["convert_sales_lead", "audit_sales_lead", "create_sales_deck"].includes(
+          action.type,
+        )
+      ) {
+        const lead = await resolveSalesLead(
+          supabase,
+          input.ownerId,
+          action.lead_ref || action.domain,
+        );
+        if (!lead) throw new Error("Sales lead could not be uniquely resolved.");
+
+        if (action.type === "convert_sales_lead") {
+          const converted = await convertSalesLeadToProspect({
+            ownerId: input.ownerId,
+            leadId: lead.id,
+            client: supabase,
+          });
+          results.push({
+            type: action.type,
+            status: "completed",
+            projectId: converted.projectId,
+            summary:
+              (converted.created ? "Converted" : "Resolved") +
+              " " +
+              (lead.company_name || lead.domain) +
+              " as a Lead Prospect project.",
+            data: { lead_id: lead.id, project_id: converted.projectId },
+          });
+          continue;
+        }
+
+        if (action.type === "audit_sales_lead") {
+          const audited = await auditSalesLeadProspect({
+            ownerId: input.ownerId,
+            leadId: lead.id,
+            maxUrls: action.max_urls || 50,
+            client: supabase,
+          });
+          results.push({
+            type: action.type,
+            status: "completed",
+            projectId: audited.projectId,
+            targetAgentKey: "sales_lead",
+            summary:
+              "Completed public prospect audit for " +
+              (lead.company_name || lead.domain) +
+              ".",
+            data: {
+              lead_id: lead.id,
+              crawl_run_id: audited.crawlRunId,
+              agent_run_id: audited.agentRunId,
+            },
+          });
+          continue;
+        }
+
+        const deck = await createSalesDeckForLead({
+          ownerId: input.ownerId,
+          leadId: lead.id,
+          client: supabase,
+        });
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId: lead.converted_project_id,
+          targetAgentKey: "reporting_output",
+          summary:
+            "Created strict-profile Sales deck draft for " +
+            (lead.company_name || lead.domain) +
+            ".",
+          data: {
+            lead_id: lead.id,
+            output_id: deck.outputId,
+            run_id: deck.runId,
+          },
         });
         continue;
       }
