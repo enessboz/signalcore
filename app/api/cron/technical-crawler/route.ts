@@ -4,6 +4,7 @@ import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { recoverStaleCrawlSchedules } from "@/lib/runtime/recovery";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -51,6 +52,13 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "technical-crawler",
+    ownerIds: (schedules || []).map((item) => item.owner_id),
+    metadata: { schedules_checked: schedules?.length || 0 },
+  });
 
   const due = (schedules || [])
     .filter((schedule) =>
@@ -141,6 +149,27 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  const failedCount = results.filter((item) => item.status === "failed").length;
+  const partialCount = results.filter((item) => item.status === "partial").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+      partial: partialCount,
+    }),
+    metrics: {
+      recovered_stale_schedules: recoveredStaleSchedules,
+      checked: schedules?.length || 0,
+      due: due.length,
+      processed: results.length,
+      failed: failedCount,
+      partial: partialCount,
+    },
+  });
 
   return NextResponse.json({
     recovered_stale_schedules: recoveredStaleSchedules,
