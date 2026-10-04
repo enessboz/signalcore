@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -50,6 +51,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "interventions",
+    ownerIds: (checks || []).map((item) => item.owner_id),
+    metadata: { due_checks: checks?.length || 0 },
+  });
+
   const results: Array<Record<string, unknown>> = [];
 
   for (const check of checks || []) {
@@ -88,6 +96,25 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  const failedCount = results.filter((item) => item.status === "failed_attempt").length;
+  const waitingCount = results.filter((item) => item.status === "pending").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+      partial: waitingCount,
+    }),
+    metrics: {
+      due_checks: checks?.length || 0,
+      evaluated: results.filter((item) => item.status === "evaluated").length,
+      still_waiting: waitingCount,
+      failed_attempts: failedCount,
+    },
+  });
 
   return NextResponse.json({
     due_checks: checks?.length || 0,
