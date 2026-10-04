@@ -3,7 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
-import { runTechnicalCrawl } from "./actions";
+import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
+import {
+  runTechnicalCrawl,
+  saveTechnicalCrawlSchedule,
+  setTechnicalCrawlScheduleStatus,
+} from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -46,12 +51,20 @@ export default async function TechnicalAuditPage({
 
   if (!project) notFound();
 
-  const { data: runs } = await supabase
-    .from("crawl_runs")
+  const [{ data: runs }, { data: crawlSchedules }] = await Promise.all([
+    supabase
+      .from("crawl_runs")
     .select("id,crawl_type,status,max_urls,pages_discovered,pages_crawled,error_count,summary,started_at,completed_at,created_at")
     .eq("project_id", id)
-    .order("created_at", { ascending: false })
-    .limit(10);
+      .order("created_at", { ascending: false })
+      .limit(10),
+    supabase
+      .from("technical_crawl_schedules")
+      .select("id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,created_at")
+      .eq("project_id", id)
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false }),
+  ]);
 
   const requestedRun = scalar(query.run);
   const selectedRun =
@@ -210,6 +223,180 @@ export default async function TechnicalAuditPage({
             {project.domain || "Add a project domain before crawling."}
           </span>
         </form>
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Background crawl schedules</h2>
+            <p>
+              Deterministic crawler schedules continue without the browser and do
+              not require an AI model.
+            </p>
+          </div>
+          <span className="sourceBadge">
+            {crawlSchedules?.length || 0} configured
+          </span>
+        </div>
+
+        <div className="technicalScheduleGrid">
+          <form
+            className="formPanel technicalScheduleForm"
+            action={saveTechnicalCrawlSchedule.bind(null, id)}
+          >
+            <div className="formGrid2">
+              <label>
+                Schedule name
+                <input
+                  name="name"
+                  defaultValue="Weekly Full Crawl"
+                  required
+                />
+              </label>
+              <label>
+                Crawl mode
+                <select name="crawlType" defaultValue="http">
+                  <option value="http">Full HTTP crawl</option>
+                  <option value="delta">Delta monitoring crawl</option>
+                </select>
+              </label>
+              <label>
+                URL limit
+                <select name="maxUrls" defaultValue="500">
+                  <option value="25">25 URLs</option>
+                  <option value="50">50 URLs</option>
+                  <option value="100">100 URLs</option>
+                  <option value="200">200 URLs</option>
+                  <option value="500">500 URLs</option>
+                </select>
+              </label>
+              <label>
+                Cadence
+                <select name="scheduleKind" defaultValue="weekly">
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+              <label>
+                Local time
+                <input name="timeLocal" type="time" defaultValue="10:00" />
+              </label>
+              <label>
+                Week days
+                <input
+                  name="daysOfWeek"
+                  defaultValue="1"
+                  placeholder="1,3,5 · Sun=0"
+                />
+              </label>
+              <label>
+                Month day
+                <input
+                  name="dayOfMonth"
+                  type="number"
+                  min="1"
+                  max="31"
+                  defaultValue="1"
+                />
+              </label>
+              <label>
+                Timezone
+                <input
+                  name="timezone"
+                  defaultValue="Europe/Istanbul"
+                />
+              </label>
+            </div>
+            <button className="primaryButton" type="submit">
+              Save crawl schedule
+            </button>
+          </form>
+
+          <div className="technicalScheduleList">
+            {(crawlSchedules || []).length ? (
+              (crawlSchedules || []).map((schedule) => (
+                <article className="technicalScheduleCard" key={schedule.id}>
+                  <div className="technicalScheduleTop">
+                    <div>
+                      <p className="eyebrow">
+                        {schedule.crawl_type === "delta"
+                          ? "Delta monitoring"
+                          : "Full HTTP crawl"}
+                      </p>
+                      <h3>{schedule.name}</h3>
+                    </div>
+                    <span className={"jobStatus job-" + schedule.status}>
+                      {schedule.status}
+                    </span>
+                  </div>
+                  <p>
+                    {scheduleDescription(
+                      schedule.schedule_kind as ScheduleKind,
+                      (schedule.schedule_config || {}) as ScheduleConfig,
+                      schedule.timezone || "Europe/Istanbul",
+                    )}
+                  </p>
+                  <div className="automationTaskMeta">
+                    <span>{schedule.max_urls} URL limit</span>
+                    <span>Last: {schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString("en-GB") : "Never"}</span>
+                    <span>State: {schedule.last_status}</span>
+                    <span>Failures: {schedule.failure_count || 0}</span>
+                  </div>
+                  {schedule.last_error ? (
+                    <p className="formMessage formError">{schedule.last_error}</p>
+                  ) : null}
+                  <div className="buttonRow">
+                    {schedule.status === "active" ? (
+                      <form
+                        action={setTechnicalCrawlScheduleStatus.bind(
+                          null,
+                          id,
+                          schedule.id,
+                          "paused",
+                        )}
+                      >
+                        <button className="secondaryButton" type="submit">
+                          Pause
+                        </button>
+                      </form>
+                    ) : (
+                      <form
+                        action={setTechnicalCrawlScheduleStatus.bind(
+                          null,
+                          id,
+                          schedule.id,
+                          "active",
+                        )}
+                      >
+                        <button className="secondaryButton" type="submit">
+                          Activate
+                        </button>
+                      </form>
+                    )}
+                    <form
+                      action={setTechnicalCrawlScheduleStatus.bind(
+                        null,
+                        id,
+                        schedule.id,
+                        "cancelled",
+                      )}
+                    >
+                      <button className="ghostButton" type="submit">
+                        Cancel
+                      </button>
+                    </form>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="emptyState smallEmpty">
+                <strong>No background crawl schedules</strong>
+                <span>Create a daily, weekly or monthly deterministic crawl.</span>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       {selectedRun ? (
