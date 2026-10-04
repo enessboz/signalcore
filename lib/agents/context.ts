@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 export type AgentProjectContext = {
@@ -57,8 +58,9 @@ function boundaryFor(projectType: string) {
 
 export async function buildAgentProjectContext(
   projectId: string,
+  client?: SupabaseClient,
 ): Promise<AgentProjectContext> {
-  const supabase = await createClient();
+  const supabase = client || (await createClient());
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
