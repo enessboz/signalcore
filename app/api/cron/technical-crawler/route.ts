@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 
   const { data: schedules, error } = await supabase
     .from("technical_crawl_schedules")
-    .select("id,owner_id,project_id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count")
+    .select("id,owner_id,project_id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,rotation_enabled,sitemap_offset")
     .eq("status", "active")
     .order("updated_at", { ascending: true })
     .limit(100);
@@ -92,6 +92,8 @@ export async function POST(request: NextRequest) {
         projectId: schedule.project_id,
         maxUrls: schedule.max_urls,
         crawlType: schedule.crawl_type === "delta" ? "delta" : "http",
+        maxRuntimeMs: 210_000,
+        sitemapOffset: schedule.rotation_enabled ? Number(schedule.sitemap_offset || 0) : 0,
         client: supabase,
       });
 
@@ -110,6 +112,11 @@ export async function POST(request: NextRequest) {
           last_status: runStatus,
           last_error: null,
           failure_count: 0,
+          sitemap_offset: schedule.rotation_enabled
+            ? Boolean(crawl.summary.sitemap_scan_exhausted)
+              ? 0
+              : Number(crawl.summary.next_sitemap_offset || 0)
+            : 0,
           updated_at: new Date().toISOString(),
         })
         .eq("id", schedule.id)
@@ -121,6 +128,11 @@ export async function POST(request: NextRequest) {
         status: runStatus,
         crawl_run_id: crawl.runId,
         summary: crawl.summary,
+        next_sitemap_offset: schedule.rotation_enabled
+          ? Boolean(crawl.summary.sitemap_scan_exhausted)
+            ? 0
+            : Number(crawl.summary.next_sitemap_offset || 0)
+          : 0,
       });
     } catch (runError) {
       const failureCount = Number(schedule.failure_count || 0) + 1;
