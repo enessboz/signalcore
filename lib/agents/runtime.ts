@@ -16,6 +16,7 @@ type AgentDefinition = {
   default_model: string | null;
   status: "planned" | "testing" | "active" | "disabled";
   instructions: string;
+  tool_policy: Record<string, unknown>;
 };
 
 function configuredModel(definition: AgentDefinition) {
@@ -105,6 +106,114 @@ async function failRun(runId: string, error: unknown, client?: SupabaseClient) {
     .eq("id", runId);
 }
 
+
+function findingFingerprint(agentKey: string, findingType: string, title: string) {
+  const normalized = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160);
+  return `agent:${agentKey}:${findingType}:${normalized || "finding"}`;
+}
+
+async function persistAgentArtifacts(input: {
+  supabase: SupabaseClient;
+  ownerId: string;
+  projectId: string;
+  runId: string;
+  target: AgentDefinition;
+  output: {
+    importance: "critical" | "high" | "medium" | "low";
+    confidence: "high" | "medium" | "low";
+    findings: Array<{
+      title: string;
+      finding_type: "issue" | "opportunity" | "strategy_discovery" | "observation";
+      why_it_matters: string;
+      recommended_action: string;
+      evidence_refs: string[];
+    }>;
+    proposed_actions: Array<{
+      action_type: string;
+      title: string;
+      summary: string;
+      risk_level: "low" | "medium" | "high" | "critical";
+      target: string | null;
+      instructions: string;
+    }>;
+  };
+}) {
+  const canWriteFindings = Boolean(input.target.tool_policy?.can_write_findings);
+  const approvalRequired = Boolean(input.target.tool_policy?.approval_required);
+
+  if (canWriteFindings) {
+    const persistable = input.output.findings.filter((finding) =>
+      ["issue", "opportunity", "strategy_discovery"].includes(finding.finding_type),
+    );
+
+    if (persistable.length) {
+      const now = new Date().toISOString();
+      const { error } = await input.supabase.from("findings").upsert(
+        persistable.map((finding) => ({
+          project_id: input.projectId,
+          owner_id: input.ownerId,
+          finding_type: finding.finding_type,
+          title: finding.title,
+          summary: finding.why_it_matters,
+          why_it_matters: finding.why_it_matters,
+          importance: input.output.importance,
+          confidence: input.output.confidence,
+          status: "open",
+          fingerprint: findingFingerprint(
+            input.target.agent_key,
+            finding.finding_type,
+            finding.title,
+          ),
+          affected_scope: {},
+          recommended_action: finding.recommended_action,
+          metadata: {
+            source: "ai_agent",
+            agent_key: input.target.agent_key,
+            agent_run_id: input.runId,
+            evidence_refs: finding.evidence_refs,
+          },
+          last_seen_at: now,
+          updated_at: now,
+        })),
+        { onConflict: "project_id,fingerprint" },
+      );
+
+      if (error) throw new Error(`Agent findings could not be saved: ${error.message}`);
+    }
+  }
+
+  if (approvalRequired && input.output.proposed_actions.length) {
+    const { error } = await input.supabase.from("approvals").insert(
+      input.output.proposed_actions.map((action) => ({
+        project_id: input.projectId,
+        owner_id: input.ownerId,
+        action_type: action.action_type,
+        status: "pending",
+        payload: {
+          title: action.title,
+          summary: action.summary,
+          target: action.target,
+          instructions: action.instructions,
+          agent_key: input.target.agent_key,
+          agent_run_id: input.runId,
+        },
+        agent_run_id: input.runId,
+        target_agent_key: input.target.agent_key,
+        summary: action.summary,
+        risk_level: action.risk_level,
+        execution_status: "not_started",
+      })),
+    );
+
+    if (error) throw new Error(`Approval requests could not be saved: ${error.message}`);
+  }
+}
+
 export async function executeAgentTask(input: {
   ownerId: string;
   projectId: string;
@@ -119,7 +228,7 @@ export async function executeAgentTask(input: {
 
   const { data: definitions, error } = await supabase
     .from("agent_definitions")
-    .select("agent_key,name,description,model_class,default_model,status,instructions")
+    .select("agent_key,name,description,model_class,default_model,status,instructions,tool_policy")
     .in("status", ["testing", "active"]);
 
   if (error || !definitions?.length) {
@@ -236,6 +345,15 @@ export async function executeAgentTask(input: {
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
       client: supabase,
+    });
+
+    await persistAgentArtifacts({
+      supabase,
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      runId,
+      target,
+      output: result.output,
     });
 
     if (result.output.handoff.needed && result.output.handoff.to_agent_key) {
