@@ -10,6 +10,14 @@ type AgentOutput = {
     evidence_refs: string[];
   }>;
   next_actions: string[];
+  proposed_actions: Array<{
+    action_type: "publish" | "deploy" | "github_write" | "cms_write" | "send_outreach" | "delete" | "external_change" | "approve_output";
+    title: string;
+    summary: string;
+    risk_level: "low" | "medium" | "high" | "critical";
+    target: string | null;
+    instructions: string;
+  }>;
   handoff: {
     needed: boolean;
     to_agent_key: string | null;
@@ -82,7 +90,7 @@ async function callResponses(body: Record<string, unknown>) {
 const specialistSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "importance", "confidence", "findings", "next_actions", "handoff"],
+  required: ["summary", "importance", "confidence", "findings", "next_actions", "proposed_actions", "handoff"],
   properties: {
     summary: { type: "string" },
     importance: { type: "string", enum: ["critical", "high", "medium", "low"] },
@@ -112,6 +120,25 @@ const specialistSchema = {
       },
     },
     next_actions: { type: "array", items: { type: "string" } },
+    proposed_actions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["action_type", "title", "summary", "risk_level", "target", "instructions"],
+        properties: {
+          action_type: {
+            type: "string",
+            enum: ["publish", "deploy", "github_write", "cms_write", "send_outreach", "delete", "external_change", "approve_output"],
+          },
+          title: { type: "string" },
+          summary: { type: "string" },
+          risk_level: { type: "string", enum: ["low", "medium", "high", "critical"] },
+          target: { type: ["string", "null"] },
+          instructions: { type: "string" },
+        },
+      },
+    },
     handoff: {
       type: "object",
       additionalProperties: false,
@@ -152,7 +179,7 @@ export async function runStructuredAgent(input: {
         content: [
           {
             type: "input_text",
-            text: `USER REQUEST:\n${input.request}\n\nPROJECT CONTEXT:\n${input.projectContext}`,
+            text: `USER REQUEST:\n${input.request}\n\nPROJECT CONTEXT:\n${input.projectContext}\n\nACTION POLICY:\nNever claim that you executed an external change. If the requested or recommended next step would publish, deploy, write to GitHub/CMS, send outreach, delete data, or otherwise change an external system, include it under proposed_actions so SignalCore can request explicit approval. Keep proposed_actions empty when no external action is needed.`,
           },
         ],
       },
