@@ -4,6 +4,7 @@ import {
   routeAgentTask,
   runStructuredAgent,
 } from "@/lib/agents/openai";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 type AgentDefinition = {
@@ -36,8 +37,9 @@ async function createRun(input: {
   userRequest: string;
   model?: string | null;
   contextManifest?: Record<string, unknown>;
+  client?: SupabaseClient;
 }) {
-  const supabase = await createClient();
+  const supabase = input.client || (await createClient());
   const { data, error } = await supabase
     .from("agent_runs")
     .insert({
@@ -69,8 +71,9 @@ async function finishRun(input: {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  client?: SupabaseClient;
 }) {
-  const supabase = await createClient();
+  const supabase = input.client || (await createClient());
   const cost = estimateModelCost(input.model, input.inputTokens, input.outputTokens);
 
   const { error } = await supabase
@@ -89,8 +92,8 @@ async function finishRun(input: {
   if (error) throw new Error(error.message);
 }
 
-async function failRun(runId: string, error: unknown) {
-  const supabase = await createClient();
+async function failRun(runId: string, error: unknown, client?: SupabaseClient) {
+  const supabase = client || (await createClient());
   await supabase
     .from("agent_runs")
     .update({
@@ -106,9 +109,11 @@ export async function executeAgentTask(input: {
   projectId: string;
   selectedAgentKey: string;
   userRequest: string;
+  triggerType?: "manual" | "scheduled" | "handoff" | "condition";
+  client?: SupabaseClient;
 }) {
-  const supabase = await createClient();
-  const context = await buildAgentProjectContext(input.projectId);
+  const supabase = input.client || (await createClient());
+  const context = await buildAgentProjectContext(input.projectId, supabase);
   const projectPrompt = contextToPrompt(context);
 
   const { data: definitions, error } = await supabase
@@ -142,6 +147,8 @@ export async function executeAgentTask(input: {
       model: routerModel,
       taskType: "routing",
       contextManifest,
+      triggerType: input.triggerType || "manual",
+      client: supabase,
     });
 
     try {
@@ -174,10 +181,11 @@ export async function executeAgentTask(input: {
         model: routerModel,
         inputTokens: routed.usage.inputTokens,
         outputTokens: routed.usage.outputTokens,
+        client: supabase,
       });
       parentRunId = routerRunId;
     } catch (routeError) {
-      await failRun(routerRunId, routeError);
+      await failRun(routerRunId, routeError, supabase);
       throw routeError;
     }
   }
@@ -193,10 +201,11 @@ export async function executeAgentTask(input: {
     projectId: input.projectId,
     agentKey: target.agent_key,
     parentRunId,
-    triggerType: parentRunId ? "handoff" : "manual",
+    triggerType: parentRunId ? "handoff" : input.triggerType || "manual",
     userRequest: input.userRequest,
     model,
     contextManifest,
+    client: supabase,
   });
 
   try {
@@ -214,6 +223,7 @@ export async function executeAgentTask(input: {
       model,
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
+      client: supabase,
     });
 
     if (result.output.handoff.needed && result.output.handoff.to_agent_key) {
@@ -229,7 +239,7 @@ export async function executeAgentTask(input: {
 
     return runId;
   } catch (agentError) {
-    await failRun(runId, agentError);
+    await failRun(runId, agentError, supabase);
     throw agentError;
   }
 }
