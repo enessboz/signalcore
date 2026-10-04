@@ -57,6 +57,7 @@ export default async function CommandPage({
     "For EatBetter, create a funnel: session_start → store_click → purchase.",
     "Every Monday at 09:30, ask the SEO Lead to review new GSC opportunities for EatBetter.",
     "Review the current highest-priority opportunities and prepare an executive summary.",
+    "Run a 50-page public prospect audit for the Lead Prospect and ask Sales Lead for the strongest saleable findings.",
   ];
 
   return (
