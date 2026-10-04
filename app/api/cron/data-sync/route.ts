@@ -15,6 +15,7 @@ function nextIsoDay(iso: string) {
   return date.toISOString().slice(0, 10);
 }
 
+// Leave headroom below the 300s function limit so queued work can checkpoint safely.
 const SAFE_RUNTIME_MS = 240_000;
 
 export async function POST(request: NextRequest) {
