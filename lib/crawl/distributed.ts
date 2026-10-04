@@ -1371,9 +1371,28 @@ export async function processQueuedCrawlBatch(input: {
       continue;
     }
 
-    const { error: pageError } = await input.client
+    const storedPage = pageRow({ run, queue: item, page });
+    const { data: existingPage, error: existingPageError } = await input.client
       .from("crawl_pages")
-      .insert(pageRow({ run, queue: item, page }));
+      .select("id")
+      .eq("crawl_run_id", run.id)
+      .eq("requested_url", storedPage.requested_url)
+      .maybeSingle();
+
+    if (existingPageError) {
+      throw new Error(
+        "Existing crawl page lookup failed: " + existingPageError.message,
+      );
+    }
+
+    const pageWrite = existingPage?.id
+      ? await input.client
+          .from("crawl_pages")
+          .update(storedPage)
+          .eq("id", existingPage.id)
+      : await input.client.from("crawl_pages").insert(storedPage);
+
+    const pageError = pageWrite.error;
     if (pageError) {
       await input.client
         .from("crawl_url_queue")
@@ -1387,6 +1406,20 @@ export async function processQueuedCrawlBatch(input: {
         .eq("claim_token", claimToken);
       failed += 1;
       continue;
+    }
+
+    const normalizedSourceUrl = normalizeUrl(page.url);
+    const { error: linkCleanupError } = await input.client
+      .from("crawl_links")
+      .delete()
+      .eq("crawl_run_id", run.id)
+      .eq("source_url", normalizedSourceUrl);
+
+    if (linkCleanupError) {
+      throw new Error(
+        "Existing crawl links could not be replaced safely: " +
+          linkCleanupError.message,
+      );
     }
 
     const links = [
