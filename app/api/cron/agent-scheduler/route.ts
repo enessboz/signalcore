@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { recoverStaleScheduledTasks } from "@/lib/runtime/recovery";
 import { createReportingOutput, type OutputFormat } from "@/lib/outputs/reporting";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -57,6 +58,13 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "agent-scheduler",
+    ownerIds: (tasks || []).map((item) => item.owner_id),
+    metadata: { tasks_checked: tasks?.length || 0 },
+  });
 
   const now = new Date();
   const due = (tasks || []).filter((task) =>
@@ -197,6 +205,25 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  const failedCount = results.filter((item) => item.status === "failed").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+    }),
+    metrics: {
+      recovered_stale_tasks: recoveredStaleTasks,
+      checked: tasks?.length || 0,
+      due: due.length,
+      processed: results.length,
+      failed: failedCount,
+      outputs_generated: results.filter((item) => Boolean(item.generated_output)).length,
+    },
+  });
 
   return NextResponse.json({
     recovered_stale_tasks: recoveredStaleTasks,
