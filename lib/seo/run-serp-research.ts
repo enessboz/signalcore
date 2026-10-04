@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchGoogleOrganicSerp } from "@/lib/seo/dataforseo";
 import { createClient } from "@/lib/supabase/server";
+import { assertBudgetAvailable, logUsage } from "@/lib/costs/budget";
 
 export async function runSerpResearch(input: {
   ownerId: string;
@@ -24,8 +25,21 @@ export async function runSerpResearch(input: {
     error?: string;
   }> = [];
 
+  const conservativeRequestEstimate = Math.max(
+    Number(process.env.SERP_ESTIMATED_COST_PER_REQUEST_USD || "0.01"),
+    0,
+  );
+
   for (const keyword of keywords) {
     try {
+      await assertBudgetAvailable({
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        category: "serp",
+        estimatedNextCost: conservativeRequestEstimate,
+        client: supabase,
+      });
+
       const result = await fetchGoogleOrganicSerp({
         keyword,
         locationCode: input.locationCode || 2840,
@@ -51,6 +65,23 @@ export async function runSerpResearch(input: {
         estimated_cost: result.cost,
       });
       if (error) throw error;
+
+      await logUsage({
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+        category: "serp",
+        provider: "dataforseo",
+        units: 1,
+        estimatedCost: conservativeRequestEstimate,
+        actualCost: result.cost,
+        metadata: {
+          keyword,
+          location_code: input.locationCode || 2840,
+          language_code: input.languageCode || "en",
+          search_type: "google_organic_live",
+        },
+        client: supabase,
+      });
 
       results.push({
         keyword,
