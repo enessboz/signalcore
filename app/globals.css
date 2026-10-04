@@ -77,3 +77,20 @@ button, input, textarea { font: inherit; }
 .sourceRow strong { font-size: 12px; }
 .sourceRow span, .sourceRow small { color: var(--muted); font-size: 10px; }
 .smallEmpty { min-height: 180px; }
+
+.integrationPanel { margin-bottom: 16px; }
+.integrationBody { display: grid; gap: 14px; }
+.connectionStatus { display: inline-flex; align-items: center; padding: 5px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.connection-connected { background: #e9f8f1; color: #187654; }
+.connection-error { background: #fff1f2; color: #b42318; }
+.connection-disconnected, .connection-paused, .connection-revoked { background: #f2f4f7; color: #667085; }
+.connection-connecting { background: #fff3df; color: #9a5c05; }
+.integrationSummary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.integrationSummary > div { padding: 12px; border: 1px solid var(--line); border-radius: 9px; display: grid; gap: 4px; }
+.integrationSummary strong { font-size: 10px; }
+.integrationSummary span { color: var(--muted); font-size: 10px; word-break: break-word; }
+.inlineForm { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.inlineForm label { min-width: min(520px, 100%); display: grid; gap: 7px; font-size: 11px; font-weight: 650; }
+.inlineForm select { border: 1px solid var(--line); background: white; border-radius: 9px; padding: 10px 11px; }
+.inlineLink { width: fit-content; }
+@media (max-width: 640px) { .integrationSummary { grid-template-columns: 1fr; } }
