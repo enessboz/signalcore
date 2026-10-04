@@ -122,8 +122,13 @@ export async function runWarehouseOpportunityScan(projectId: string) {
         last_run_at: new Date().toISOString(),
         last_data_date: result.dataDate,
         last_status:
-          result.gscAvailable || result.ga4Available ? "succeeded" : "partial",
-        last_error: null,
+          result.gscReady || result.gscQueryPageReady || result.ga4Ready
+            ? "succeeded"
+            : "partial",
+        last_error:
+          result.gscReady || result.gscQueryPageReady || result.ga4Ready
+            ? null
+            : "Warehouse coverage is not sufficient yet; the engine will wait for more synced days.",
         consecutive_failures: 0,
         updated_at: new Date().toISOString(),
       },
