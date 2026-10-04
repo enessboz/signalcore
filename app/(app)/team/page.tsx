@@ -59,6 +59,7 @@ export default async function TeamPage({
     { data: schedules },
     { data: handoffs },
     { data: actions },
+    { count: pendingApprovals },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -85,6 +86,10 @@ export default async function TeamPage({
       .select("id,action_type,status,target_agent_key,created_at,result")
       .order("created_at", { ascending: false })
       .limit(16),
+    supabase
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending"),
   ]);
 
   const typedAgents = (agents || []) as AgentDefinitionRow[];
@@ -210,6 +215,7 @@ export default async function TeamPage({
         <div><strong>{schedules?.length || 0}</strong> scheduled tasks</div>
         <div><strong>{handoffs?.length || 0}</strong> open handoffs</div>
         <div><strong>{workerReady ? "On" : "Waiting"}</strong> background worker</div>
+        <Link href="/approvals"><strong>{pendingApprovals || 0}</strong> pending approvals</Link>
       </section>
 
       <section className="orgChart">
