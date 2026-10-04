@@ -78,3 +78,84 @@ drop policy if exists crawl_pages_update_own on public.crawl_pages;
 create policy crawl_pages_update_own on public.crawl_pages for update to authenticated using ((select auth.uid()) = owner_id) with check ((select auth.uid()) = owner_id);
 drop policy if exists crawl_pages_delete_own on public.crawl_pages;
 create policy crawl_pages_delete_own on public.crawl_pages for delete to authenticated using ((select auth.uid()) = owner_id);
+
+
+-- Technical Crawl V2: redirect evidence, document metadata and link graph.
+alter table public.crawl_pages
+  add column if not exists requested_url text,
+  add column if not exists final_url text,
+  add column if not exists redirect_chain jsonb not null default '[]'::jsonb,
+  add column if not exists x_robots_tag text,
+  add column if not exists hreflangs jsonb not null default '[]'::jsonb,
+  add column if not exists html_lang text,
+  add column if not exists meta_refresh text,
+  add column if not exists h3s jsonb not null default '[]'::jsonb,
+  add column if not exists h4s jsonb not null default '[]'::jsonb,
+  add column if not exists h5s jsonb not null default '[]'::jsonb,
+  add column if not exists h6s jsonb not null default '[]'::jsonb,
+  add column if not exists content_length_bytes integer,
+  add column if not exists invalid_structured_data_count integer not null default 0,
+  add column if not exists indexable boolean,
+  add column if not exists indexability_reason text,
+  add column if not exists crawl_depth integer,
+  add column if not exists inlink_count integer not null default 0,
+  add column if not exists sitemap_present boolean not null default false,
+  add column if not exists orphan_candidate boolean not null default false;
+
+alter table public.crawl_pages
+  drop constraint if exists crawl_pages_crawl_run_id_url_key;
+
+create unique index if not exists crawl_pages_run_requested_unique
+  on public.crawl_pages(crawl_run_id, requested_url)
+  where requested_url is not null;
+create index if not exists crawl_pages_run_final_url_idx
+  on public.crawl_pages(crawl_run_id, final_url);
+create index if not exists crawl_pages_run_indexable_idx
+  on public.crawl_pages(crawl_run_id,indexable);
+create index if not exists crawl_pages_run_depth_idx
+  on public.crawl_pages(crawl_run_id,crawl_depth);
+create index if not exists crawl_pages_run_sitemap_idx
+  on public.crawl_pages(crawl_run_id,sitemap_present,orphan_candidate);
+
+create table if not exists public.crawl_links (
+  id uuid primary key default gen_random_uuid(),
+  crawl_run_id uuid not null references public.crawl_runs(id) on delete cascade,
+  project_id uuid not null,
+  owner_id uuid not null,
+  source_url text not null,
+  target_url text not null,
+  link_scope text not null check (link_scope in ('internal','external')),
+  anchor_text text,
+  rel text,
+  nofollow boolean not null default false,
+  target_crawled boolean not null default false,
+  created_at timestamptz not null default now(),
+  foreign key (project_id, owner_id)
+    references public.projects(id, owner_id) on delete cascade
+);
+
+create index if not exists crawl_links_run_source_idx
+  on public.crawl_links(crawl_run_id,source_url);
+create index if not exists crawl_links_run_target_idx
+  on public.crawl_links(crawl_run_id,target_url);
+create index if not exists crawl_links_project_owner_fk_idx
+  on public.crawl_links(project_id,owner_id);
+create index if not exists crawl_links_project_run_idx
+  on public.crawl_links(project_id,crawl_run_id);
+
+grant select,insert,update,delete on public.crawl_links to authenticated;
+alter table public.crawl_links enable row level security;
+
+drop policy if exists crawl_links_select_own on public.crawl_links;
+create policy crawl_links_select_own on public.crawl_links
+  for select to authenticated using ((select auth.uid())=owner_id);
+drop policy if exists crawl_links_insert_own on public.crawl_links;
+create policy crawl_links_insert_own on public.crawl_links
+  for insert to authenticated with check ((select auth.uid())=owner_id);
+drop policy if exists crawl_links_update_own on public.crawl_links;
+create policy crawl_links_update_own on public.crawl_links
+  for update to authenticated using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists crawl_links_delete_own on public.crawl_links;
+create policy crawl_links_delete_own on public.crawl_links
+  for delete to authenticated using ((select auth.uid())=owner_id);
