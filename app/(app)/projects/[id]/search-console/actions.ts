@@ -1,13 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { getProjectGoogleResource } from "@/lib/google/project-resource";
-import { detectGscOpportunities } from "@/lib/rules/gsc-opportunities";
+import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
 import { createClient } from "@/lib/supabase/server";
-
-function dateDaysAgo(daysAgo: number) {
-  return new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
-}
 
 export async function saveGscView(projectId: string, formData: FormData) {
   const name = String(formData.get("name") || "").trim();
@@ -50,33 +45,19 @@ export async function runGscOpportunityScan(projectId: string) {
   const ownerId = claimsData?.claims?.sub;
   if (!ownerId) redirect("/login");
 
-  let resource: Awaited<ReturnType<typeof getProjectGoogleResource>>;
-  try {
-    resource = await getProjectGoogleResource(projectId, "gsc");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "GSC property is not available.";
-    redirect(`/projects/${projectId}/search-console?error=${encodeURIComponent(message)}`);
-  }
-
-  const currentEnd = dateDaysAgo(3);
-  const currentStart = dateDaysAgo(30);
-  const previousEnd = dateDaysAgo(31);
-  const previousStart = dateDaysAgo(58);
-
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .insert({
       project_id: projectId,
       owner_id: ownerId,
-      job_type: "gsc_opportunity_scan",
+      job_type: "warehouse_opportunity_scan",
       trigger_type: "manual",
       status: "running",
       payload: {
-        currentStart,
-        currentEnd,
-        previousStart,
-        previousEnd,
-        siteUrl: resource.resource_id,
+        scan_gsc: true,
+        scan_ga4: false,
+        scan_rank: true,
+        source: "search_console_workspace",
       },
       started_at: new Date().toISOString(),
     })
@@ -85,65 +66,55 @@ export async function runGscOpportunityScan(projectId: string) {
 
   if (jobError || !job) {
     redirect(
-      `/projects/${projectId}/search-console?error=${encodeURIComponent(jobError?.message || "Could not start opportunity scan")}`,
+      "/projects/" +
+        projectId +
+        "/search-console?error=" +
+        encodeURIComponent(
+          jobError?.message || "Could not start warehouse opportunity scan",
+        ),
     );
   }
 
   try {
-    const candidates = await detectGscOpportunities({
-      siteUrl: resource.resource_id,
-      currentStart,
-      currentEnd,
-      previousStart,
-      previousEnd,
+    const result = await detectWarehouseOpportunities({
+      ownerId,
+      projectId,
+      scanGsc: true,
+      scanGa4: false,
+      scanRank: true,
+      client: supabase,
     });
 
-    const now = new Date().toISOString();
-    if (candidates.length) {
-      const { error: findingError } = await supabase.from("findings").upsert(
-        candidates.map((candidate) => ({
-          project_id: projectId,
-          owner_id: ownerId,
-          finding_type: "opportunity",
-          title: candidate.title,
-          summary: candidate.summary,
-          why_it_matters: candidate.whyItMatters,
-          importance: candidate.importance,
-          confidence: "high",
-          status: "open",
-          fingerprint: candidate.fingerprint,
-          affected_scope: candidate.affectedScope,
-          recommended_action: candidate.recommendedAction,
-          metadata: {
-            source: "gsc",
-            detector: "rule_engine_v1",
-            current_period: { start: currentStart, end: currentEnd },
-            previous_period: { start: previousStart, end: previousEnd },
-            ...candidate.metadata,
-          },
-          last_seen_at: now,
-          updated_at: now,
-        })),
-        { onConflict: "project_id,fingerprint" },
+    if (!result.gscAvailable && !result.gscQueryPageAvailable) {
+      throw new Error(
+        "No synced GSC warehouse data is available yet. Complete a GSC backfill or incremental sync first.",
       );
-
-      if (findingError) throw findingError;
     }
 
     await supabase
       .from("jobs")
       .update({
         status: "succeeded",
-        result_summary: { candidates: candidates.length },
+        result_summary: result,
         completed_at: new Date().toISOString(),
       })
       .eq("id", job.id);
 
     redirect(
-      `/opportunities?project=${projectId}&message=${encodeURIComponent(`GSC scan completed: ${candidates.length} opportunity candidates`)}`,
+      "/opportunities?project=" +
+        projectId +
+        "&message=" +
+        encodeURIComponent(
+          "Warehouse GSC scan completed: " +
+            String(result.candidates) +
+            " intelligence candidates",
+        ),
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "GSC opportunity scan failed.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Warehouse GSC opportunity scan failed.";
 
     await supabase
       .from("jobs")
@@ -154,6 +125,12 @@ export async function runGscOpportunityScan(projectId: string) {
       })
       .eq("id", job.id);
 
-    redirect(`/projects/${projectId}/search-console?error=${encodeURIComponent(message)}`);
+    redirect(
+      "/projects/" +
+        projectId +
+        "/search-console?error=" +
+        encodeURIComponent(message),
+    );
   }
 }
+
