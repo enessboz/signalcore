@@ -43,27 +43,52 @@ function getZonedParts(date: Date, timeZone: string) {
   };
 }
 
-function timeMatches(localTime: string | null | undefined, parts: ReturnType<typeof getZonedParts>) {
-  if (!localTime) return false;
-  const [hour, minute] = localTime.split(":").map(Number);
-  return parts.hour === hour && parts.minute === minute;
+function localDateKey(parts: ReturnType<typeof getZonedParts>) {
+  return [
+    String(parts.year).padStart(4, "0"),
+    String(parts.month).padStart(2, "0"),
+    String(parts.day).padStart(2, "0"),
+  ].join("-");
 }
 
-function ranThisLocalSlot(
-  lastRunAt: string | null | undefined,
-  now: Date,
-  timeZone: string,
+function localMinutes(parts: ReturnType<typeof getZonedParts>) {
+  return parts.hour * 60 + parts.minute;
+}
+
+function scheduledMinutes(localTime: string | null | undefined) {
+  if (!localTime) return null;
+  const [hour, minute] = localTime.split(":").map(Number);
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+  return hour * 60 + minute;
+}
+
+function sameLocalDate(a: Date, b: Date, timeZone: string) {
+  return localDateKey(getZonedParts(a, timeZone)) ===
+    localDateKey(getZonedParts(b, timeZone));
+}
+
+function scheduledDayMatches(
+  scheduleKind: ScheduleKind,
+  scheduleConfig: ScheduleConfig,
+  parts: ReturnType<typeof getZonedParts>,
 ) {
-  if (!lastRunAt) return false;
-  const last = getZonedParts(new Date(lastRunAt), timeZone);
-  const current = getZonedParts(now, timeZone);
-  return (
-    last.year === current.year &&
-    last.month === current.month &&
-    last.day === current.day &&
-    last.hour === current.hour &&
-    last.minute === current.minute
-  );
+  if (scheduleKind === "daily") return true;
+  if (scheduleKind === "weekly") {
+    return (scheduleConfig.days_of_week || []).includes(parts.weekday);
+  }
+  if (scheduleKind === "monthly") {
+    return Number(scheduleConfig.day_of_month || 0) === parts.day;
+  }
+  return false;
 }
 
 export function isScheduleDue(input: {
@@ -84,20 +109,26 @@ export function isScheduleDue(input: {
   }
 
   const parts = getZonedParts(now, timezone);
-  if (!timeMatches(scheduleConfig.time_local, parts)) return false;
-  if (ranThisLocalSlot(input.lastRunAt, now, timezone)) return false;
+  if (!scheduledDayMatches(scheduleKind, scheduleConfig, parts)) return false;
 
-  if (scheduleKind === "daily") return true;
+  const targetMinutes = scheduledMinutes(scheduleConfig.time_local);
+  if (targetMinutes === null) return false;
 
-  if (scheduleKind === "weekly") {
-    return (scheduleConfig.days_of_week || []).includes(parts.weekday);
+  // Polling workers may wake a few minutes after the requested local time.
+  // A slot remains due for the rest of that local day until it is completed.
+  if (localMinutes(parts) < targetMinutes) return false;
+
+  if (input.lastRunAt) {
+    const lastRun = new Date(input.lastRunAt);
+    if (
+      !Number.isNaN(lastRun.getTime()) &&
+      sameLocalDate(lastRun, now, timezone)
+    ) {
+      return false;
+    }
   }
 
-  if (scheduleKind === "monthly") {
-    return Number(scheduleConfig.day_of_month || 0) === parts.day;
-  }
-
-  return false;
+  return true;
 }
 
 export function scheduleDescription(
