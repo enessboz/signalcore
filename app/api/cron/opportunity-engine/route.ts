@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleJobs } from "@/lib/runtime/recovery";
 import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
 
 export const runtime = "nodejs";
@@ -27,6 +29,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:opportunity-engine",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another Opportunity Engine invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleJobs = await recoverStaleJobs(supabase);
 
   const { data: settings, error } = await supabase
     .from("opportunity_scan_settings")
@@ -160,6 +177,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
+    recovered_stale_jobs: recoveredStaleJobs,
     configured: settings?.length || 0,
     due: targets.length,
     processed: results.length,
