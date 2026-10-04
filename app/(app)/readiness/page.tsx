@@ -40,6 +40,8 @@ export default async function ReadinessPage() {
     { count: budgetLimits },
     { count: activeTechnicalSchedules },
     { count: activeSalesAutomations },
+    { count: activeRankProjects },
+    { count: activeOpportunityProjects },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -96,6 +98,14 @@ export default async function ReadinessPage() {
       .select("id", { count: "exact", head: true })
       .eq("auto_discovery_enabled", true)
       .in("status", ["draft", "active"]),
+    supabase
+      .from("rank_tracking_settings")
+      .select("project_id", { count: "exact", head: true })
+      .eq("active", true),
+    supabase
+      .from("opportunity_scan_settings")
+      .select("project_id", { count: "exact", head: true })
+      .eq("enabled", true),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -109,10 +119,14 @@ export default async function ReadinessPage() {
   const cronSecretReady = Boolean(process.env.CRON_SECRET);
   const deterministicWorkerReady = supabaseWorkerReady && cronSecretReady;
   const salesWorkerReady = deterministicWorkerReady && dataForSeoReady;
+  const rankWorkerReady = deterministicWorkerReady && dataForSeoReady;
+  const opportunityWorkerReady = deterministicWorkerReady;
   const totalScheduled =
     (activeSchedules || 0) +
     (activeTechnicalSchedules || 0) +
-    (activeSalesAutomations || 0);
+    (activeSalesAutomations || 0) +
+    (activeRankProjects || 0) +
+    (activeOpportunityProjects || 0);
 
   const coreItems: ReadinessItem[] = [
     {
@@ -147,7 +161,7 @@ export default async function ReadinessPage() {
       label: "Background worker",
       ready: deterministicWorkerReady,
       detail: deterministicWorkerReady
-        ? "Deterministic Google sync and technical crawl workers can run."
+        ? "Deterministic Google sync, technical crawl and Opportunity Engine workers can run."
         : "SUPABASE_SECRET_KEY and CRON_SECRET are required. Background workers remain intentionally paused.",
       actionHref: "/automations",
       actionLabel: "Automations",
@@ -197,6 +211,26 @@ export default async function ReadinessPage() {
         : `${activeSalesAutomations || 0} campaigns configured; DataForSEO + worker credentials are required.`,
       actionHref: "/sales",
       actionLabel: "Sales",
+    },
+    {
+      label: "Rank tracking automation",
+      ready: rankWorkerReady,
+      optional: true,
+      detail: rankWorkerReady
+        ? `${activeRankProjects || 0} project(s) have active Rank Tracking.`
+        : `${activeRankProjects || 0} project(s) configured; DataForSEO + worker credentials are required.`,
+      actionHref: "/automations",
+      actionLabel: "Automations",
+    },
+    {
+      label: "Automatic Opportunity Engine",
+      ready: opportunityWorkerReady,
+      optional: true,
+      detail: opportunityWorkerReady
+        ? `${activeOpportunityProjects || 0} project(s) can scan warehouse evidence automatically.`
+        : `${activeOpportunityProjects || 0} project(s) configured; worker credentials are required.`,
+      actionHref: "/opportunities",
+      actionLabel: "Intelligence Inbox",
     },
     {
       label: "Cost guardrails",
@@ -265,7 +299,7 @@ export default async function ReadinessPage() {
           <span>Scheduled work</span>
           <strong>{totalScheduled}</strong>
           <small>
-            {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales
+            {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales · {activeRankProjects || 0} rank · {activeOpportunityProjects || 0} intelligence
           </small>
         </article>
         <article className="healthCard">
