@@ -16,6 +16,8 @@ type SyncJob = {
   end_date: string;
   cursor_date: string | null;
   status: string;
+  attempt_count?: number;
+  last_attempt_at?: string | null;
 };
 
 function addDays(iso: string, days: number) {
@@ -353,6 +355,7 @@ export async function processGoogleSyncJob(
     .update({
       status: "running",
       started_at: new Date().toISOString(),
+      last_attempt_at: new Date().toISOString(),
       error: null,
     })
     .eq("id", job.id);
@@ -411,6 +414,9 @@ export async function processGoogleSyncJob(
           source: job.source,
           dataset_rows: datasetRows,
         },
+        attempt_count: 0,
+        last_attempt_at: new Date().toISOString(),
+        error: null,
         completed_at: completed ? new Date().toISOString() : null,
       })
       .eq("id", job.id);
@@ -419,12 +425,17 @@ export async function processGoogleSyncJob(
     return { completed, date, rows: totalRows };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google sync failed.";
+    const attemptCount = Number(job.attempt_count || 0) + 1;
+    const terminalFailure = attemptCount >= 3;
+
     await supabase
       .from("google_sync_queue")
       .update({
-        status: "failed",
+        status: terminalFailure ? "failed" : "queued",
+        attempt_count: attemptCount,
+        last_attempt_at: new Date().toISOString(),
         error: message,
-        completed_at: new Date().toISOString(),
+        completed_at: terminalFailure ? new Date().toISOString() : null,
       })
       .eq("id", job.id);
 
@@ -440,7 +451,7 @@ export async function processGoogleSyncJob(
           owner_id: job.owner_id,
           source: job.source,
           dataset,
-          status: "failed",
+          status: terminalFailure ? "failed" : "queued",
           last_attempt_at: new Date().toISOString(),
           last_error: message,
           updated_at: new Date().toISOString(),
