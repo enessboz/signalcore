@@ -19,6 +19,14 @@ revoke all on public.runtime_leases from anon;
 revoke all on public.runtime_leases from authenticated;
 grant select,insert,update,delete on public.runtime_leases to service_role;
 
+drop policy if exists "runtime_leases_deny_authenticated" on public.runtime_leases;
+create policy "runtime_leases_deny_authenticated"
+on public.runtime_leases
+for all
+to authenticated
+using (false)
+with check (false);
+
 create or replace function public.acquire_runtime_lease(
   p_lease_key text,
   p_holder text,
