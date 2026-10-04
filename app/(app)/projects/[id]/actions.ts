@@ -93,48 +93,63 @@ export async function addBackgroundSource(projectId: string, formData: FormData)
   redirect(`/projects/${projectId}?message=Background%20source%20added%20to%20Project%20Brain`);
 }
 
+export async function bindGoogleResource(
+  projectId: string,
+  bindingType: "gsc" | "ga4",
+  formData: FormData,
+) {
+  const resourceId = textValue(formData, "resourceId");
+  const supabase = await createClient();
 
-export async function selectGscProperty(projectId: string, formData: FormData) {
-  const siteUrl = textValue(formData, "siteUrl");
-  if (!siteUrl) {
-    redirect(`/projects/${projectId}?error=Select%20a%20Search%20Console%20property`);
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (claimsError || !ownerId) redirect("/login");
+
+  if (!resourceId) {
+    await supabase
+      .from("project_bindings")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("binding_type", bindingType)
+      .eq("binding_role", "primary");
+
+    redirect(`/projects/${projectId}?message=${bindingType.toUpperCase()}%20binding%20removed`);
   }
 
-  const supabase = await createClient();
-  const { data: integration, error } = await supabase
-    .from("project_integrations")
-    .select("id,config")
-    .eq("project_id", projectId)
-    .eq("provider", "gsc")
+  const expectedType = bindingType === "gsc" ? "gsc_property" : "ga4_property";
+
+  const { data: resource, error: resourceError } = await supabase
+    .from("connection_resources")
+    .select("id,connection_id,resource_type,resource_id,display_name")
+    .eq("id", resourceId)
+    .eq("resource_type", expectedType)
+    .eq("active", true)
     .single();
 
-  if (error || !integration) {
-    redirect(`/projects/${projectId}?error=Google%20Search%20Console%20is%20not%20connected`);
+  if (resourceError || !resource) {
+    redirect(`/projects/${projectId}?error=Selected%20Google%20resource%20is%20not%20available`);
   }
 
-  const config = integration.config as {
-    available_sites?: Array<{ siteUrl?: string; permissionLevel?: string }>;
-  };
+  const { error } = await supabase
+    .from("project_bindings")
+    .upsert(
+      {
+        project_id: projectId,
+        owner_id: ownerId,
+        connection_id: resource.connection_id,
+        resource_id: resource.id,
+        binding_type: bindingType,
+        binding_role: "primary",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "project_id,binding_type,binding_role" },
+    );
 
-  const isAllowed = (config.available_sites || []).some(
-    (site) => site.siteUrl === siteUrl,
+  if (error) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  redirect(
+    `/projects/${projectId}?message=${bindingType.toUpperCase()}%20property%20connected%20to%20project`,
   );
-
-  if (!isAllowed) {
-    redirect(`/projects/${projectId}?error=Selected%20property%20is%20not%20available%20for%20this%20connection`);
-  }
-
-  const { error: updateError } = await supabase
-    .from("project_integrations")
-    .update({
-      selected_resource: siteUrl,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", integration.id);
-
-  if (updateError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(updateError.message)}`);
-  }
-
-  redirect(`/projects/${projectId}?message=Search%20Console%20property%20selected`);
 }
