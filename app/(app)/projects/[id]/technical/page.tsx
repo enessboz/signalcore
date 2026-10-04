@@ -13,6 +13,31 @@ import {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
+type CrawlBenchmark = {
+  run_id: string;
+  status: string;
+  execution_mode: string;
+  max_urls: number;
+  pages_discovered: number;
+  pages_crawled: number;
+  error_count: number;
+  duration_ms: number | null;
+  pages_per_minute: number | null;
+  page_rows: number;
+  page_bytes: number;
+  link_rows: number;
+  link_bytes: number;
+  estimated_run_bytes: number;
+  rendered_pages: number;
+  performance_samples: number;
+  finding_count: number;
+  reviewed_findings: number;
+  confirmed_findings: number;
+  false_positive_findings: number;
+  needs_context_findings: number;
+  false_positive_ratio: number | null;
+};
+
 function scalar(value: string | string[] | undefined, fallback = "") {
   return Array.isArray(value) ? value[0] || fallback : value || fallback;
 }
@@ -154,30 +179,7 @@ export default async function TechnicalAuditPage({
     sitemap_urls: unknown;
     error: string | null;
   } = null;
-  let benchmark: null | {
-    run_id: string;
-    status: string;
-    execution_mode: string;
-    max_urls: number;
-    pages_discovered: number;
-    pages_crawled: number;
-    error_count: number;
-    duration_ms: number | null;
-    pages_per_minute: number | null;
-    page_rows: number;
-    page_bytes: number;
-    link_rows: number;
-    link_bytes: number;
-    estimated_run_bytes: number;
-    rendered_pages: number;
-    performance_samples: number;
-    finding_count: number;
-    reviewed_findings: number;
-    confirmed_findings: number;
-    false_positive_findings: number;
-    needs_context_findings: number;
-    false_positive_ratio: number | null;
-  } = null;
+  let benchmark: CrawlBenchmark | null = null;
   const findingReviews = new Map<
     string,
     { verdict: string; note: string | null }
@@ -269,7 +271,7 @@ export default async function TechnicalAuditPage({
       error: string | null;
     };
     performanceResults = (performanceResult.data || []) as typeof performanceResults;
-    benchmark = (benchmarkResult.data || null) as typeof benchmark;
+    benchmark = (benchmarkResult.data || null) as CrawlBenchmark | null;
     for (const review of reviewResult.data || []) {
       findingReviews.set(review.finding_id, {
         verdict: review.verdict,
