@@ -2,6 +2,8 @@ import Link from "next/link";
 
 const sections = [
   ["Overview", "/"],
+  ["Command", "/command"],
+  ["Team Room", "/team"],
   ["Projects", "/projects"],
   ["Agents", "/agents"],
   ["Opportunities", "/opportunities"],
