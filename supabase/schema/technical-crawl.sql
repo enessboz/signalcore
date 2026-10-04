@@ -159,3 +159,60 @@ create policy crawl_links_update_own on public.crawl_links
 drop policy if exists crawl_links_delete_own on public.crawl_links;
 create policy crawl_links_delete_own on public.crawl_links
   for delete to authenticated using ((select auth.uid())=owner_id);
+
+
+create table if not exists public.technical_crawl_schedules (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  project_id uuid not null,
+  name text not null,
+  crawl_type text not null default 'http'
+    check (crawl_type in ('http','delta')),
+  max_urls integer not null default 100
+    check (max_urls between 1 and 500),
+  schedule_kind text not null
+    check (schedule_kind in ('daily','weekly','monthly')),
+  schedule_config jsonb not null default '{}'::jsonb,
+  timezone text not null default 'Europe/Istanbul',
+  status text not null default 'active'
+    check (status in ('active','paused','running','failed','cancelled')),
+  last_run_at timestamptz,
+  last_crawl_run_id uuid references public.crawl_runs(id) on delete set null,
+  last_status text not null default 'idle'
+    check (last_status in ('idle','running','succeeded','partial','failed','paused')),
+  last_error text,
+  failure_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  foreign key (project_id,owner_id)
+    references public.projects(id,owner_id) on delete cascade,
+  unique(project_id,name)
+);
+
+create index if not exists technical_crawl_schedules_owner_status_idx
+  on public.technical_crawl_schedules(owner_id,status,last_run_at);
+create index if not exists technical_crawl_schedules_project_owner_fk_idx
+  on public.technical_crawl_schedules(project_id,owner_id);
+create index if not exists technical_crawl_schedules_last_run_fk_idx
+  on public.technical_crawl_schedules(last_crawl_run_id);
+
+grant select,insert,update,delete on public.technical_crawl_schedules to authenticated;
+alter table public.technical_crawl_schedules enable row level security;
+
+drop policy if exists technical_crawl_schedules_select_own on public.technical_crawl_schedules;
+create policy technical_crawl_schedules_select_own
+  on public.technical_crawl_schedules for select to authenticated
+  using ((select auth.uid())=owner_id);
+drop policy if exists technical_crawl_schedules_insert_own on public.technical_crawl_schedules;
+create policy technical_crawl_schedules_insert_own
+  on public.technical_crawl_schedules for insert to authenticated
+  with check ((select auth.uid())=owner_id);
+drop policy if exists technical_crawl_schedules_update_own on public.technical_crawl_schedules;
+create policy technical_crawl_schedules_update_own
+  on public.technical_crawl_schedules for update to authenticated
+  using ((select auth.uid())=owner_id)
+  with check ((select auth.uid())=owner_id);
+drop policy if exists technical_crawl_schedules_delete_own on public.technical_crawl_schedules;
+create policy technical_crawl_schedules_delete_own
+  on public.technical_crawl_schedules for delete to authenticated
+  using ((select auth.uid())=owner_id);
