@@ -24,6 +24,26 @@ export default async function OutputDetailPage({
     .eq("id", output.project_id)
     .maybeSingle();
 
+  const data = (output.data || {}) as {
+    deliverable_contract?: {
+      type?: string;
+      slides?: Array<{
+        slide_type?: string;
+        title?: string;
+        key_message?: string;
+        bullets?: string[];
+        evidence_refs?: string[];
+      }>;
+    };
+    output_profile_rules?: Record<string, unknown> | null;
+    output_profile_strict?: boolean;
+  };
+
+  const slides =
+    data.deliverable_contract?.type === "presentation_slide_plan"
+      ? data.deliverable_contract.slides || []
+      : [];
+
   return (
     <div className="page">
       <header className="pageHeader">
@@ -37,6 +57,51 @@ export default async function OutputDetailPage({
           <Link className="ghostButton" href="/outputs">Back</Link>
         </div>
       </header>
+
+      {slides.length ? (
+        <>
+          <section className="outputContractBar">
+            <div>
+              <strong>Presentation contract</strong>
+              <span>{data.output_profile_strict ? "Strict profile" : "Flexible profile"}</span>
+            </div>
+            <div>
+              <strong>Slides</strong>
+              <span>{slides.length}</span>
+            </div>
+            <div>
+              <strong>Renderer</strong>
+              <span>Master-template mapping pending</span>
+            </div>
+          </section>
+
+          <section className="slidePlanGrid">
+            {slides.map((slide, index) => (
+              <article className="slidePlanCard" key={index}>
+                <div className="slidePlanTop">
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{slide.slide_type || "slide"}</strong>
+                </div>
+                <h2>{slide.title || "Untitled slide"}</h2>
+                <p>{slide.key_message || "No primary message."}</p>
+                {slide.bullets?.length ? (
+                  <ul>
+                    {slide.bullets.map((bullet, bulletIndex) => (
+                      <li key={bulletIndex}>{bullet}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {slide.evidence_refs?.length ? (
+                  <div className="slideEvidence">
+                    <strong>Evidence</strong>
+                    <span>{slide.evidence_refs.join(" · ")}</span>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </section>
+        </>
+      ) : null}
 
       <section className="panel outputDocument">
         <pre>{output.body_markdown || JSON.stringify(output.data, null, 2)}</pre>
