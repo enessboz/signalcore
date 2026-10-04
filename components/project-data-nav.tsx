@@ -1,0 +1,29 @@
+import Link from "next/link";
+
+export function ProjectDataNav({
+  projectId,
+  active,
+}: {
+  projectId: string;
+  active: "overview" | "gsc" | "ga4";
+}) {
+  const items = [
+    ["overview", "Project", `/projects/${projectId}`],
+    ["gsc", "Search Console", `/projects/${projectId}/search-console`],
+    ["ga4", "GA4 Analytics", `/projects/${projectId}/analytics`],
+  ] as const;
+
+  return (
+    <nav className="projectDataNav">
+      {items.map(([key, label, href]) => (
+        <Link
+          key={key}
+          href={href}
+          className={active === key ? "projectDataNavItem active" : "projectDataNavItem"}
+        >
+          {label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
