@@ -299,6 +299,80 @@ function pageFindings(state: PageGraphState): CrawlFinding[] {
     });
   }
 
+  if (page.hreflangs.length) {
+    const byLanguage = new Map<string, string[]>();
+    for (const reference of page.hreflangs) {
+      const language = reference.hreflang.trim().toLowerCase();
+      const urls = byLanguage.get(language) || [];
+      urls.push(reference.url);
+      byLanguage.set(language, urls);
+
+      if (
+        language !== "x-default" &&
+        !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(language)
+      ) {
+        out.push({
+          fingerprint:
+            "crawl:hreflang-invalid-code:" +
+            key +
+            ":" +
+            findingKey(language),
+          title: "Potentially invalid hreflang code",
+          summary:
+            page.requestedUrl +
+            ' uses hreflang="' +
+            reference.hreflang +
+            '", which does not match the expected language/region tag shape.',
+          importance: "low",
+          affectedScope: {
+            url: page.requestedUrl,
+            hreflang: reference.hreflang,
+            target_url: reference.url,
+          },
+          recommendedAction:
+            "Verify the language/region tag against the intended locale and use a valid BCP 47-style language tag or x-default.",
+          metadata: {
+            rule: "hreflang_invalid_code",
+            hreflang: reference.hreflang,
+          },
+        });
+      }
+    }
+
+    for (const [language, urls] of byLanguage) {
+      const uniqueTargets = Array.from(new Set(urls.map(normalizeUrl)));
+      if (uniqueTargets.length <= 1) continue;
+
+      out.push({
+        fingerprint:
+          "crawl:hreflang-duplicate-language:" +
+          key +
+          ":" +
+          findingKey(language),
+        title: "Hreflang language maps to multiple URLs",
+        summary:
+          page.requestedUrl +
+          " defines " +
+          uniqueTargets.length +
+          ' different targets for hreflang="' +
+          language +
+          '".',
+        importance: "medium",
+        affectedScope: {
+          url: page.requestedUrl,
+          hreflang: language,
+          target_urls: uniqueTargets.slice(0, 20),
+        },
+        recommendedAction:
+          "Keep one intended alternate URL per hreflang value on this page.",
+        metadata: {
+          rule: "hreflang_duplicate_language",
+          hreflang: language,
+        },
+      });
+    }
+  }
+
   if (page.responseMs && page.responseMs >= 3000) {
     out.push({
       fingerprint: "crawl:slow-response:" + key,
@@ -525,6 +599,264 @@ function redirectInternalLinkFindings(states: PageGraphState[]): CrawlFinding[] 
   }));
 }
 
+
+function canonicalTargetFindings(
+  sourceStates: PageGraphState[],
+  allStates: PageGraphState[],
+): CrawlFinding[] {
+  const stateByUrl = new Map<string, PageGraphState>();
+  for (const state of allStates) {
+    stateByUrl.set(state.requestedNormalized, state);
+    stateByUrl.set(state.finalNormalized, state);
+  }
+
+  const findings: CrawlFinding[] = [];
+
+  for (const source of sourceStates) {
+    const canonical = source.page.canonical;
+    if (!canonical) continue;
+
+    const canonicalNormalized = normalizeUrl(canonical);
+    const sourceFinal = source.finalNormalized;
+
+    if (canonicalNormalized === sourceFinal) continue;
+
+    const target = stateByUrl.get(canonicalNormalized);
+    if (!target) continue;
+
+    if (
+      target.page.statusCode === null ||
+      target.page.statusCode < 200 ||
+      target.page.statusCode >= 300
+    ) {
+      findings.push({
+        fingerprint:
+          "crawl:canonical-target-status:" +
+          findingKey(source.page.requestedUrl),
+        title: "Canonical points to a non-success crawled URL",
+        summary:
+          source.page.requestedUrl +
+          " canonicals to " +
+          canonical +
+          ", which returned HTTP " +
+          String(target.page.statusCode || "no response") +
+          ".",
+        importance:
+          target.page.statusCode && target.page.statusCode >= 500
+            ? "high"
+            : "medium",
+        affectedScope: {
+          url: source.page.requestedUrl,
+          canonical,
+          target_status: target.page.statusCode,
+        },
+        recommendedAction:
+          "Point the canonical to the intended successful preferred URL, or restore the canonical target if the relationship is intentional.",
+        metadata: {
+          rule: "canonical_target_status",
+          target_status: target.page.statusCode,
+        },
+      });
+      continue;
+    }
+
+    const targetRobots = [target.page.robotsMeta, target.page.xRobotsTag]
+      .filter(Boolean)
+      .join(",")
+      .toLowerCase();
+
+    if (targetRobots.includes("noindex")) {
+      findings.push({
+        fingerprint:
+          "crawl:canonical-target-noindex:" +
+          findingKey(source.page.requestedUrl),
+        title: "Canonical points to a noindex target",
+        summary:
+          source.page.requestedUrl +
+          " canonicals to a crawled URL that is excluded by noindex: " +
+          canonical +
+          ".",
+        importance: "high",
+        affectedScope: {
+          url: source.page.requestedUrl,
+          canonical,
+          target_robots_meta: target.page.robotsMeta,
+          target_x_robots_tag: target.page.xRobotsTag,
+        },
+        recommendedAction:
+          "Align canonical and indexability signals so the preferred canonical target is eligible for indexing when that is the intended outcome.",
+        metadata: { rule: "canonical_target_noindex" },
+      });
+    }
+
+    const targetCanonical = target.page.canonical
+      ? normalizeUrl(target.page.canonical)
+      : null;
+
+    if (
+      targetCanonical &&
+      targetCanonical !== target.finalNormalized &&
+      targetCanonical !== canonicalNormalized
+    ) {
+      findings.push({
+        fingerprint:
+          "crawl:canonical-chain:" +
+          findingKey(source.page.requestedUrl),
+        title: "Canonical chain detected",
+        summary:
+          source.page.requestedUrl +
+          " canonicals to " +
+          canonical +
+          ", and that target canonicals again to " +
+          String(target.page.canonical) +
+          ".",
+        importance: "medium",
+        affectedScope: {
+          url: source.page.requestedUrl,
+          canonical,
+          target_canonical: target.page.canonical,
+        },
+        recommendedAction:
+          "Point the source directly to the final preferred canonical URL where the relationship is intentional.",
+        metadata: { rule: "canonical_chain" },
+      });
+    }
+  }
+
+  return findings;
+}
+
+function hreflangGraphFindings(
+  sourceStates: PageGraphState[],
+  allStates: PageGraphState[],
+): CrawlFinding[] {
+  const stateByUrl = new Map<string, PageGraphState>();
+  for (const state of allStates) {
+    stateByUrl.set(state.requestedNormalized, state);
+    stateByUrl.set(state.finalNormalized, state);
+  }
+
+  const findings: CrawlFinding[] = [];
+
+  for (const source of sourceStates) {
+    if (!source.page.hreflangs.length) continue;
+
+    for (const reference of source.page.hreflangs) {
+      const target = stateByUrl.get(normalizeUrl(reference.url));
+      if (!target) continue;
+
+      if (
+        target.page.statusCode === null ||
+        target.page.statusCode < 200 ||
+        target.page.statusCode >= 300
+      ) {
+        findings.push({
+          fingerprint:
+            "crawl:hreflang-target-status:" +
+            findingKey(source.page.requestedUrl) +
+            ":" +
+            findingKey(reference.hreflang),
+          title: "Hreflang points to a non-success crawled URL",
+          summary:
+            source.page.requestedUrl +
+            ' uses hreflang="' +
+            reference.hreflang +
+            '" for ' +
+            reference.url +
+            ", which returned HTTP " +
+            String(target.page.statusCode || "no response") +
+            ".",
+          importance: "medium",
+          affectedScope: {
+            url: source.page.requestedUrl,
+            hreflang: reference.hreflang,
+            target_url: reference.url,
+            target_status: target.page.statusCode,
+          },
+          recommendedAction:
+            "Use a successful, indexable alternate URL for the hreflang target or remove the invalid alternate reference.",
+          metadata: {
+            rule: "hreflang_target_status",
+            hreflang: reference.hreflang,
+            target_status: target.page.statusCode,
+          },
+        });
+        continue;
+      }
+
+      const targetRobots = [target.page.robotsMeta, target.page.xRobotsTag]
+        .filter(Boolean)
+        .join(",")
+        .toLowerCase();
+
+      if (targetRobots.includes("noindex")) {
+        findings.push({
+          fingerprint:
+            "crawl:hreflang-target-noindex:" +
+            findingKey(source.page.requestedUrl) +
+            ":" +
+            findingKey(reference.hreflang),
+          title: "Hreflang points to a noindex alternate",
+          summary:
+            source.page.requestedUrl +
+            ' uses hreflang="' +
+            reference.hreflang +
+            '" for a crawled URL excluded by noindex.',
+          importance: "medium",
+          affectedScope: {
+            url: source.page.requestedUrl,
+            hreflang: reference.hreflang,
+            target_url: reference.url,
+          },
+          recommendedAction:
+            "Align alternate-language references with indexable URLs that can participate in the hreflang cluster.",
+          metadata: {
+            rule: "hreflang_target_noindex",
+            hreflang: reference.hreflang,
+          },
+        });
+      }
+
+      const sourceCandidates = new Set([
+        source.requestedNormalized,
+        source.finalNormalized,
+      ]);
+      const hasReturn = target.page.hreflangs.some((candidate) =>
+        sourceCandidates.has(normalizeUrl(candidate.url)),
+      );
+
+      if (!hasReturn) {
+        findings.push({
+          fingerprint:
+            "crawl:hreflang-missing-return:" +
+            findingKey(source.page.requestedUrl) +
+            ":" +
+            findingKey(reference.hreflang),
+          title: "Hreflang return reference not detected",
+          summary:
+            source.page.requestedUrl +
+            " points to " +
+            reference.url +
+            " as an alternate, but the crawled target does not reference this source URL back.",
+          importance: "medium",
+          affectedScope: {
+            url: source.page.requestedUrl,
+            hreflang: reference.hreflang,
+            target_url: reference.url,
+          },
+          recommendedAction:
+            "Review the hreflang cluster and add reciprocal alternate references when both pages are intended members of the same language/region set.",
+          metadata: {
+            rule: "hreflang_missing_return",
+            hreflang: reference.hreflang,
+          },
+        });
+      }
+    }
+  }
+
+  return findings;
+}
 
 type PreviousPageSnapshot = {
   requested_url: string | null;
@@ -1131,9 +1463,15 @@ export async function runProjectCrawl(input: {
             ...redirectInternalLinkFindings(states),
           ];
 
+    const graphValidationFindings = [
+      ...canonicalTargetFindings(pageRuleStates, states),
+      ...hreflangGraphFindings(pageRuleStates, states),
+    ];
+
     const findings = [
       ...(delta?.regressionFindings || []),
       ...pageRuleStates.flatMap(pageFindings),
+      ...graphValidationFindings,
       ...aggregateFindings,
     ].slice(0, 750);
 
