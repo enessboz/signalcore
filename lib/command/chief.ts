@@ -41,6 +41,8 @@ type ChiefAction = {
   data_source: "gsc" | "ga4" | null;
   enabled: boolean | null;
   backfill_days: number | null;
+  follow_up_report: boolean | null;
+  minimum_importance: "critical" | "high" | "medium" | "low" | null;
 };
 
 export type ChiefPlan = {
@@ -107,6 +109,8 @@ const actionSchema = {
     "data_source",
     "enabled",
     "backfill_days",
+    "follow_up_report",
+    "minimum_importance",
   ],
   properties: {
     type: {
@@ -181,6 +185,11 @@ const actionSchema = {
     },
     enabled: { type: ["boolean", "null"] },
     backfill_days: { type: ["integer", "null"], enum: [30, 90, 180, null] },
+    follow_up_report: { type: ["boolean", "null"] },
+    minimum_importance: {
+      type: ["string", "null"],
+      enum: ["critical", "high", "medium", "low", null],
+    },
   },
 };
 
@@ -233,7 +242,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nFor first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nFor first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
