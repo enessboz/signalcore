@@ -42,6 +42,8 @@ export default async function ReadinessPage() {
     { count: activeSalesAutomations },
     { count: activeRankProjects },
     { count: activeOpportunityProjects },
+    { count: monitoringInterventions },
+    { count: pendingInterventionChecks },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -106,6 +108,14 @@ export default async function ReadinessPage() {
       .from("opportunity_scan_settings")
       .select("project_id", { count: "exact", head: true })
       .eq("enabled", true),
+    supabase
+      .from("seo_interventions")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "monitoring"),
+    supabase
+      .from("seo_intervention_checks")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending"),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -121,12 +131,14 @@ export default async function ReadinessPage() {
   const salesWorkerReady = deterministicWorkerReady && dataForSeoReady;
   const rankWorkerReady = deterministicWorkerReady && dataForSeoReady;
   const opportunityWorkerReady = deterministicWorkerReady;
+  const interventionWorkerReady = deterministicWorkerReady;
   const totalScheduled =
     (activeSchedules || 0) +
     (activeTechnicalSchedules || 0) +
     (activeSalesAutomations || 0) +
     (activeRankProjects || 0) +
-    (activeOpportunityProjects || 0);
+    (activeOpportunityProjects || 0) +
+    (monitoringInterventions || 0);
 
   const coreItems: ReadinessItem[] = [
     {
@@ -161,7 +173,7 @@ export default async function ReadinessPage() {
       label: "Background worker",
       ready: deterministicWorkerReady,
       detail: deterministicWorkerReady
-        ? "Deterministic Google sync, technical crawl and Opportunity Engine workers can run."
+        ? "Deterministic Google sync, technical crawl, Opportunity Engine and intervention monitoring workers can run."
         : "SUPABASE_SECRET_KEY and CRON_SECRET are required. Background workers remain intentionally paused.",
       actionHref: "/automations",
       actionLabel: "Automations",
@@ -233,6 +245,16 @@ export default async function ReadinessPage() {
       actionLabel: "Intelligence Inbox",
     },
     {
+      label: "SEO Intervention Monitoring",
+      ready: interventionWorkerReady,
+      optional: true,
+      detail: interventionWorkerReady
+        ? `${monitoringInterventions || 0} intervention(s) monitoring · ${pendingInterventionChecks || 0} pending checkpoint(s).`
+        : `${monitoringInterventions || 0} intervention(s) configured · ${pendingInterventionChecks || 0} pending checkpoint(s); worker credentials are required for automatic evaluation.`,
+      actionHref: "/automations",
+      actionLabel: "Automations",
+    },
+    {
       label: "Cost guardrails",
       ready: Boolean(budgetLimits),
       optional: true,
@@ -299,7 +321,7 @@ export default async function ReadinessPage() {
           <span>Scheduled work</span>
           <strong>{totalScheduled}</strong>
           <small>
-            {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales · {activeRankProjects || 0} rank · {activeOpportunityProjects || 0} intelligence
+            {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales · {activeRankProjects || 0} rank · {activeOpportunityProjects || 0} intelligence · {monitoringInterventions || 0} interventions
           </small>
         </article>
         <article className="healthCard">
