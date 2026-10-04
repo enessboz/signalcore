@@ -1,6 +1,7 @@
 import { executeAgentTask } from "@/lib/agents/runtime";
 import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
 import { runSerpResearch } from "@/lib/seo/run-serp-research";
+import { enqueueGoogleSync } from "@/lib/google/sync";
 import type { ChiefPlan } from "@/lib/command/chief";
 import { createClient } from "@/lib/supabase/server";
 
@@ -174,12 +175,109 @@ export async function executeChiefActions(input: {
           "run_prospect_audit",
           "link_github_repo",
           "run_serp_research",
+          "set_google_auto_sync",
+          "queue_google_backfill",
         ].includes(action.type) &&
         !projectId
       ) {
         throw new Error(
           `Project could not be resolved from "${action.project_ref || "empty reference"}".`,
         );
+      }
+
+      if (action.type === "set_google_auto_sync") {
+        const source = action.data_source;
+        if (!source || action.enabled === null) {
+          throw new Error("Data source and enabled state are required.");
+        }
+
+        const { data: binding, error: bindingError } = await supabase
+          .from("project_bindings")
+          .select("id")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .eq("binding_type", source)
+          .eq("binding_role", "primary")
+          .maybeSingle();
+
+        if (bindingError || !binding) {
+          throw new Error(
+            `${source.toUpperCase()} property must be bound before auto sync can be changed.`,
+          );
+        }
+
+        const { error } = await supabase
+          .from("project_bindings")
+          .update({
+            auto_sync_enabled: action.enabled,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", binding.id)
+          .eq("owner_id", input.ownerId);
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: `${source.toUpperCase()} auto sync ${action.enabled ? "enabled" : "disabled"}.`,
+          data: { source, enabled: action.enabled },
+        });
+        continue;
+      }
+
+      if (action.type === "queue_google_backfill") {
+        const source = action.data_source;
+        const days = action.backfill_days;
+        if (!source || !days || ![30, 90, 180].includes(days)) {
+          throw new Error("Backfill requires GSC/GA4 source and 30, 90 or 180 days.");
+        }
+
+        const { data: binding, error: bindingError } = await supabase
+          .from("project_bindings")
+          .select("id")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .eq("binding_type", source)
+          .eq("binding_role", "primary")
+          .maybeSingle();
+
+        if (bindingError || !binding) {
+          throw new Error(
+            `${source.toUpperCase()} property must be bound before backfill can be queued.`,
+          );
+        }
+
+        const lagDays = source === "gsc" ? 3 : 1;
+        const endDate = new Date(Date.now() - lagDays * 86400000)
+          .toISOString()
+          .slice(0, 10);
+        const startDate = new Date(
+          Date.now() - (lagDays + days - 1) * 86400000,
+        )
+          .toISOString()
+          .slice(0, 10);
+
+        const jobId = await enqueueGoogleSync({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          source,
+          startDate,
+          endDate,
+          mode: "backfill",
+          priority: 60,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary: `${source.toUpperCase()} ${days}-day backfill queued.`,
+          data: { source, days, job_id: jobId, start_date: startDate, end_date: endDate },
+        });
+        continue;
       }
 
       if (action.type === "run_serp_research") {
