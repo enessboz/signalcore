@@ -14,16 +14,69 @@ export async function createReportingOutput(input: {
 }) {
   const supabase = input.client || (await createClient());
 
+  const { data: projectProfile } = await supabase
+    .from("project_output_profiles")
+    .select("profile_id, output_profiles(profile_key,rules,strict_mode,name)")
+    .eq("project_id", input.projectId)
+    .eq("owner_id", input.ownerId)
+    .eq("output_type", input.format)
+    .maybeSingle();
+
+  const nestedProfile = Array.isArray(projectProfile?.output_profiles)
+    ? projectProfile?.output_profiles[0]
+    : projectProfile?.output_profiles;
+
+  let profile:
+    | {
+        profile_key: string;
+        rules: Record<string, unknown>;
+        strict_mode: boolean;
+        name: string;
+      }
+    | null = nestedProfile
+      ? {
+          profile_key: nestedProfile.profile_key,
+          rules: (nestedProfile.rules || {}) as Record<string, unknown>,
+          strict_mode: Boolean(nestedProfile.strict_mode),
+          name: nestedProfile.name,
+        }
+      : null;
+
+  if (!profile) {
+    const { data: defaultProfile } = await supabase
+      .from("output_profiles")
+      .select("profile_key,rules,strict_mode,name")
+      .eq("owner_id", input.ownerId)
+      .eq("output_type", input.format)
+      .eq("active", true)
+      .order("is_default", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (defaultProfile) {
+      profile = {
+        profile_key: defaultProfile.profile_key,
+        rules: (defaultProfile.rules || {}) as Record<string, unknown>,
+        strict_mode: Boolean(defaultProfile.strict_mode),
+        name: defaultProfile.name,
+      };
+    }
+  }
+
+  const profileInstruction = profile
+    ? `\n\nOUTPUT PROFILE: ${profile.name}\nSTRICT MODE: ${profile.strict_mode ? "ON" : "OFF"}\nRULES:\n${JSON.stringify(profile.rules, null, 2)}\nFollow these output rules. Do not invent a format, layout, claim style, or section that conflicts with a strict profile.`
+    : "";
+
   const runId = await executeAgentTask({
     ownerId: input.ownerId,
     projectId: input.projectId,
     selectedAgentKey: "reporting_output",
-    userRequest: `Prepare a ${input.format} output. ${input.instruction}`,
+    userRequest: `Prepare a ${input.format} output. ${input.instruction}${profileInstruction}`,
     triggerType: input.triggerType || "manual",
     client: supabase,
   });
 
-  const [{ data: completedRun }, { data: project }, { data: profile }] = await Promise.all([
+  const [{ data: completedRun }, { data: project }] = await Promise.all([
     supabase
       .from("agent_runs")
       .select("output")
@@ -33,15 +86,6 @@ export async function createReportingOutput(input: {
       .from("projects")
       .select("name")
       .eq("id", input.projectId)
-      .maybeSingle(),
-    supabase
-      .from("output_profiles")
-      .select("profile_key,rules")
-      .eq("owner_id", input.ownerId)
-      .eq("output_type", input.format)
-      .eq("active", true)
-      .order("is_default", { ascending: false })
-      .limit(1)
       .maybeSingle(),
   ]);
 
@@ -101,6 +145,7 @@ export async function createReportingOutput(input: {
       data: {
         ...output,
         output_profile_rules: profile?.rules || null,
+        output_profile_strict: profile?.strict_mode || false,
       },
       profile_key: profile?.profile_key || null,
     })
