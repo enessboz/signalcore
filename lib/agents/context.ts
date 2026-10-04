@@ -11,6 +11,12 @@ export type AgentProjectContext = {
     metadata: Record<string, unknown>;
   };
   boundary: string;
+  global_brain: Array<{
+    category: string;
+    title: string;
+    content: string;
+    priority: number;
+  }>;
   facts: Array<{
     fact_key: string;
     fact_value: unknown;
@@ -98,7 +104,7 @@ export async function buildAgentProjectContext(
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
-    .select("id,name,domain,project_type,description,metadata")
+    .select("id,owner_id,name,domain,project_type,description,metadata")
     .eq("id", projectId)
     .single();
 
@@ -107,6 +113,7 @@ export async function buildAgentProjectContext(
   }
 
   const [
+    { data: globalBrain },
     { data: facts },
     { data: background },
     { data: findings },
@@ -115,6 +122,14 @@ export async function buildAgentProjectContext(
     { data: repositories },
     { data: serpEvidence },
   ] = await Promise.all([
+    supabase
+      .from("global_brain_entries")
+      .select("category,title,content,priority")
+      .eq("owner_id", project.owner_id)
+      .eq("active", true)
+      .order("priority", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(30),
     supabase
       .from("project_facts")
       .select("fact_key,fact_value,knowledge_type,confidence,updated_at")
@@ -203,6 +218,7 @@ export async function buildAgentProjectContext(
       metadata: (project.metadata || {}) as Record<string, unknown>,
     },
     boundary: boundaryFor(project.project_type),
+    global_brain: globalBrain || [],
     facts: (facts || []).map(({ fact_key, fact_value, knowledge_type, confidence }) => ({
       fact_key,
       fact_value,
@@ -248,6 +264,7 @@ export function contextToPrompt(context: AgentProjectContext) {
   const compact = {
     project: context.project,
     boundary: context.boundary,
+    global_brain: context.global_brain,
     facts: context.facts,
     background: context.background,
     open_findings: context.findings,
