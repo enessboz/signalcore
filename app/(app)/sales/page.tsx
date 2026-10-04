@@ -1,6 +1,7 @@
 
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import {
   auditLead,
   convertLead,
@@ -9,6 +10,7 @@ import {
   qualifyCampaignTopLeads,
   qualifyLead,
   runSalesCampaign,
+  saveSalesCampaignAutomation,
   setLeadStage,
 } from "./actions";
 
@@ -68,7 +70,7 @@ export default async function SalesPage({
   ] = await Promise.all([
     supabase
       .from("sales_campaigns")
-      .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd,last_run_at,created_at")
+      .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd,last_run_at,auto_discovery_enabled,schedule_kind,schedule_config,timezone,auto_qualify_count,last_auto_run_at,last_auto_status,last_auto_error,auto_failure_count,created_at")
       .order("created_at", { ascending: false }),
     supabase
       .from("sales_leads")
@@ -316,6 +318,116 @@ export default async function SalesPage({
                         </span>
                       </div>
                     ) : null}
+
+                    <div className="salesAutomationBox">
+                      <div className="salesAutomationHeader">
+                        <div>
+                          <strong>Background discovery</strong>
+                          <span>
+                            {campaign.auto_discovery_enabled && campaign.schedule_kind
+                              ? scheduleDescription(
+                                  campaign.schedule_kind as ScheduleKind,
+                                  (campaign.schedule_config || {}) as ScheduleConfig,
+                                  campaign.timezone || "Europe/Istanbul",
+                                )
+                              : "Automation off"}
+                          </span>
+                        </div>
+                        <span className={"jobStatus job-" + (campaign.last_auto_status || "idle")}>
+                          {campaign.last_auto_status || "idle"}
+                        </span>
+                      </div>
+                      {campaign.last_auto_error ? (
+                        <p className="formMessage formError">{campaign.last_auto_error}</p>
+                      ) : null}
+                      <form
+                        className="salesAutomationForm"
+                        action={saveSalesCampaignAutomation.bind(null, campaign.id)}
+                      >
+                        <label className="checkboxLabel">
+                          <input
+                            name="autoEnabled"
+                            type="checkbox"
+                            defaultChecked={Boolean(campaign.auto_discovery_enabled)}
+                          />
+                          Enable
+                        </label>
+                        <label>
+                          Cadence
+                          <select name="scheduleKind" defaultValue={campaign.schedule_kind || "weekly"}>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                          </select>
+                        </label>
+                        <label>
+                          Time
+                          <input
+                            name="timeLocal"
+                            type="time"
+                            defaultValue={
+                              String(
+                                ((campaign.schedule_config || {}) as Record<string, unknown>).time_local ||
+                                  "10:00",
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Week days
+                          <input
+                            name="daysOfWeek"
+                            defaultValue={
+                              Array.isArray(
+                                ((campaign.schedule_config || {}) as Record<string, unknown>).days_of_week,
+                              )
+                                ? (
+                                    ((campaign.schedule_config || {}) as Record<string, unknown>)
+                                      .days_of_week as unknown[]
+                                  ).join(",")
+                                : "1"
+                            }
+                            placeholder="1,3,5"
+                          />
+                        </label>
+                        <label>
+                          Month day
+                          <input
+                            name="dayOfMonth"
+                            type="number"
+                            min="1"
+                            max="31"
+                            defaultValue={
+                              Number(
+                                ((campaign.schedule_config || {}) as Record<string, unknown>).day_of_month ||
+                                  1,
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Auto qualify
+                          <select
+                            name="autoQualifyCount"
+                            defaultValue={String(campaign.auto_qualify_count || 0)}
+                          >
+                            <option value="0">None</option>
+                            <option value="3">Top 3</option>
+                            <option value="5">Top 5</option>
+                            <option value="10">Top 10</option>
+                          </select>
+                        </label>
+                        <label>
+                          Timezone
+                          <input
+                            name="timezone"
+                            defaultValue={campaign.timezone || "Europe/Istanbul"}
+                          />
+                        </label>
+                        <button className="ghostButton" type="submit">Save automation</button>
+                      </form>
+                    </div>
+
                     <div className="buttonRow">
                       <form action={runSalesCampaign.bind(null, campaign.id)}>
                         <button className="primaryButton" type="submit" disabled={!dataForSeoReady}>
