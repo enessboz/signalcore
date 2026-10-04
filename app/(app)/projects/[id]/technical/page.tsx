@@ -154,6 +154,19 @@ export default async function TechnicalAuditPage({
   }
 
   const summary = (selectedRun?.summary || {}) as Record<string, unknown>;
+  const deltaSummary = (summary.delta || null) as
+    | {
+        baseline_run_id?: string | null;
+        compared_urls?: number;
+        changed_urls?: number;
+        new_urls?: number;
+        content_changes?: number;
+        status_changes?: number;
+        title_changes?: number;
+        canonical_changes?: number;
+        indexability_changes?: number;
+      }
+    | null;
   const indexablePages = pages.filter((page) => page.indexable === true).length;
   const orphanPages = pages.filter((page) => page.orphan_candidate).length;
   const redirectPages = pages.filter(
@@ -448,6 +461,57 @@ export default async function TechnicalAuditPage({
               <small>HTTP sample</small>
             </article>
           </section>
+
+          {selectedRun.crawl_type === "delta" && deltaSummary ? (
+            <section className="panel">
+              <div className="panelHeader">
+                <div>
+                  <h2>Delta comparison</h2>
+                  <p>
+                    Changes are compared with the latest previous successful crawl.
+                    Unchanged page-rule findings are not re-surfaced as current-run noise.
+                  </p>
+                </div>
+                <span className="sourceBadge">
+                  baseline {deltaSummary.baseline_run_id ? deltaSummary.baseline_run_id.slice(0, 8) : "none"}
+                </span>
+              </div>
+              <div className="foundationGrid technicalDeltaGrid">
+                <div>
+                  <strong>Compared URLs</strong>
+                  <span>{deltaSummary.compared_urls || 0}</span>
+                </div>
+                <div>
+                  <strong>Changed URLs</strong>
+                  <span>{deltaSummary.changed_urls || 0}</span>
+                </div>
+                <div>
+                  <strong>New URLs</strong>
+                  <span>{deltaSummary.new_urls || 0}</span>
+                </div>
+                <div>
+                  <strong>Content changes</strong>
+                  <span>{deltaSummary.content_changes || 0}</span>
+                </div>
+                <div>
+                  <strong>Status changes</strong>
+                  <span>{deltaSummary.status_changes || 0}</span>
+                </div>
+                <div>
+                  <strong>Indexability changes</strong>
+                  <span>{deltaSummary.indexability_changes || 0}</span>
+                </div>
+                <div>
+                  <strong>Title changes</strong>
+                  <span>{deltaSummary.title_changes || 0}</span>
+                </div>
+                <div>
+                  <strong>Canonical changes</strong>
+                  <span>{deltaSummary.canonical_changes || 0}</span>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="panelHeader">
