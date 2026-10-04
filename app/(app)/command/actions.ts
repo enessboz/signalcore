@@ -120,6 +120,8 @@ export async function sendChiefCommand(formData: FormData) {
         "run_prospect_audit",
         "link_github_repo",
         "run_serp_research",
+        "set_google_auto_sync",
+        "queue_google_backfill",
       ],
       safety: {
         external_impact_requires_approval: true,
