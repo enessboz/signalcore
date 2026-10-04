@@ -76,6 +76,23 @@ create table if not exists public.gsc_query_daily (
     references public.projects(id, owner_id) on delete cascade
 );
 
+create table if not exists public.gsc_query_page_daily (
+  project_id uuid not null,
+  owner_id uuid not null,
+  date date not null,
+  search_type text not null default 'web',
+  query text not null,
+  page text not null,
+  clicks double precision not null default 0,
+  impressions double precision not null default 0,
+  ctr double precision not null default 0,
+  position double precision not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (project_id, date, search_type, query, page),
+  foreign key (project_id, owner_id)
+    references public.projects(id, owner_id) on delete cascade
+);
+
 create table if not exists public.ga4_landing_page_daily (
   project_id uuid not null,
   owner_id uuid not null,
@@ -113,3 +130,8 @@ alter table public.project_bindings
   add column if not exists sync_config jsonb not null default '{}'::jsonb;
 
 -- Indexes, grants and RLS policies are applied in production as part of the same rollout.
+
+
+-- Production rollout also defines get_gsc_query_page_insights(...)
+-- to surface query ownership splits and dominant URL switches from the
+-- query+page warehouse without labeling them as definitive cannibalization.
