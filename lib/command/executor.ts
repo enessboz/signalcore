@@ -1,5 +1,6 @@
 import { executeAgentTask } from "@/lib/agents/runtime";
 import { runProjectCrawl } from "@/lib/crawl/run-project-crawl";
+import { runSerpResearch } from "@/lib/seo/run-serp-research";
 import type { ChiefPlan } from "@/lib/command/chief";
 import { createClient } from "@/lib/supabase/server";
 
@@ -172,12 +173,61 @@ export async function executeChiefActions(input: {
           "run_technical_audit",
           "run_prospect_audit",
           "link_github_repo",
+          "run_serp_research",
         ].includes(action.type) &&
         !projectId
       ) {
         throw new Error(
           `Project could not be resolved from "${action.project_ref || "empty reference"}".`,
         );
+      }
+
+      if (action.type === "run_serp_research") {
+        const keywords = action.keywords.map((keyword) => keyword.trim()).filter(Boolean);
+        if (!keywords.length) throw new Error("SERP research requires at least one keyword.");
+
+        const research = await runSerpResearch({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          keywords,
+          locationCode: action.location_code || 2840,
+          languageCode: action.language_code || "en",
+        });
+
+        if (!research.succeeded) {
+          throw new Error(
+            research.results.find((item) => item.error)?.error ||
+              "SERP research could not retrieve any successful results.",
+          );
+        }
+
+        const task =
+          action.task?.trim() ||
+          "Analyze the latest cached SERP evidence. Identify intent patterns, competitor coverage, content gaps and practical landing-page opportunities. Separate observed SERP facts from strategic hypotheses.";
+
+        const runId = await executeAgentTask({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          selectedAgentKey: "research_content",
+          userRequest: task,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          targetAgentKey: "research_content",
+          summary:
+            "SERP research completed for " +
+            String(research.succeeded) +
+            " keyword(s) and handed to Research & Content Strategy Agent.",
+          data: {
+            agent_run_id: runId,
+            keywords,
+            estimated_cost: research.estimatedCost,
+          },
+        });
+        continue;
       }
 
       if (action.type === "link_github_repo") {
