@@ -10,6 +10,38 @@ function textValue(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeHost(value: string | null | undefined) {
+  if (!value) return "";
+  try {
+    const normalized = value.startsWith("sc-domain:")
+      ? value.slice("sc-domain:".length)
+      : value.includes("://")
+        ? new URL(value).hostname
+        : new URL("https://" + value).hostname;
+    return normalized.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  } catch {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/^sc-domain:/, "")
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0]
+      .replace(/\.$/, "");
+  }
+}
+
+function domainsCompatible(projectDomain: string, resourceValue: string) {
+  const projectHost = normalizeHost(projectDomain);
+  const resourceHost = normalizeHost(resourceValue);
+  if (!projectHost || !resourceHost) return false;
+  return (
+    projectHost === resourceHost ||
+    projectHost.endsWith("." + resourceHost) ||
+    resourceHost.endsWith("." + projectHost)
+  );
+}
+
 function chunkText(input: string, maxChars = 1500) {
   const paragraphs = input
     .split(/\n{2,}/)
@@ -120,16 +152,46 @@ export async function bindGoogleResource(
 
   const expectedType = bindingType === "gsc" ? "gsc_property" : "ga4_property";
 
-  const { data: resource, error: resourceError } = await supabase
-    .from("connection_resources")
-    .select("id,connection_id,resource_type,resource_id,display_name")
-    .eq("id", resourceId)
-    .eq("resource_type", expectedType)
-    .eq("active", true)
-    .single();
+  const [{ data: resource, error: resourceError }, { data: project }] =
+    await Promise.all([
+      supabase
+        .from("connection_resources")
+        .select("id,connection_id,resource_type,resource_id,display_name")
+        .eq("id", resourceId)
+        .eq("resource_type", expectedType)
+        .eq("active", true)
+        .single(),
+      supabase
+        .from("projects")
+        .select("id,domain")
+        .eq("id", projectId)
+        .eq("owner_id", ownerId)
+        .single(),
+    ]);
 
   if (resourceError || !resource) {
     redirect(`/projects/${projectId}?error=Selected%20Google%20resource%20is%20not%20available`);
+  }
+
+  if (!project) {
+    redirect("/projects?error=Project%20not%20available");
+  }
+
+  if (
+    bindingType === "gsc" &&
+    project.domain &&
+    !domainsCompatible(project.domain, resource.resource_id)
+  ) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "?error=" +
+        encodeURIComponent(
+          "Selected GSC property does not match project domain " +
+            project.domain +
+            ". Choose the matching Search Console property.",
+        ),
+    );
   }
 
   const { error } = await supabase
@@ -142,6 +204,7 @@ export async function bindGoogleResource(
         resource_id: resource.id,
         binding_type: bindingType,
         binding_role: "primary",
+        auto_sync_enabled: false,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "project_id,binding_type,binding_role" },
@@ -197,7 +260,9 @@ export async function queueGoogleBackfill(
   formData: FormData,
 ) {
   const requestedDays = Number(String(formData.get("days") || "90"));
-  const days = [30, 90, 180].includes(requestedDays) ? requestedDays : 90;
+  const days = [30, 90, 180, 480].includes(requestedDays)
+    ? requestedDays
+    : 90;
 
   const supabase = await createClient();
   const { data: claimsData } = await supabase.auth.getClaims();
