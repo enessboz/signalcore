@@ -136,8 +136,29 @@ export default async function SettingsPage({
         ) : (
           <div className="integrationBody">
             <p className="formMessage formError">
-              Google OAuth application credentials are not configured yet. The app code is ready; add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to Vercel.
+              Google OAuth application credentials are not configured yet. The SignalCore side is ready.
             </p>
+
+            <div className="setupChecklist">
+              <div>
+                <strong>1. Enable Google APIs</strong>
+                <span>Search Console API</span>
+                <span>Google Analytics Admin API</span>
+                <span>Google Analytics Data API</span>
+              </div>
+              <div>
+                <strong>2. Create OAuth Web Client</strong>
+                <span>Application type: Web application</span>
+                <span>Authorized redirect URI:</span>
+                <code>https://signalcore-chi.vercel.app/api/connections/google/callback</code>
+              </div>
+              <div>
+                <strong>3. Add Vercel secrets</strong>
+                <span>GOOGLE_CLIENT_ID</span>
+                <span>GOOGLE_CLIENT_SECRET</span>
+                <span>CREDENTIAL_ENCRYPTION_KEY is already configured.</span>
+              </div>
+            </div>
           </div>
         )}
       </section>
