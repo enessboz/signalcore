@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProjectTypeBadge } from "@/components/project-type-badge";
+import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectType } from "@/lib/domain/types";
 import { addBackgroundSource, bindGoogleResource } from "./actions";
@@ -91,6 +92,8 @@ export default async function ProjectPage({
         <ProjectTypeBadge type={project.project_type as ProjectType} />
       </header>
 
+      <ProjectDataNav projectId={id} active="overview" />
+
       {query.error ? <p className="formMessage formError pageMessage">{query.error}</p> : null}
       {query.message ? <p className="formMessage formSuccess pageMessage">{query.message}</p> : null}
 
@@ -165,9 +168,17 @@ export default async function ProjectPage({
               </form>
             </div>
 
-            <Link href="/settings" className="ghostButton inlineLink">
-              Manage Google account connection
-            </Link>
+            <div className="buttonRow">
+              <Link href={`/projects/${id}/search-console`} className="secondaryButton inlineLink">
+                Open Search Console
+              </Link>
+              <Link href={`/projects/${id}/analytics`} className="secondaryButton inlineLink">
+                Open GA4 Analytics
+              </Link>
+              <Link href="/settings" className="ghostButton inlineLink">
+                Manage Google connection
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="integrationBody">
