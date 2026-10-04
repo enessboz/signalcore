@@ -85,7 +85,9 @@ export async function POST(request: NextRequest) {
       });
 
       const status =
-        scan.gscAvailable || scan.ga4Available ? "succeeded" : "partial";
+        scan.gscReady || scan.gscQueryPageReady || scan.ga4Ready
+          ? "succeeded"
+          : "partial";
 
       await supabase
         .from("opportunity_scan_settings")
@@ -95,7 +97,7 @@ export async function POST(request: NextRequest) {
           last_status: status,
           last_error:
             status === "partial"
-              ? "No current GSC/GA4 warehouse data was available for the enabled sources."
+              ? "Warehouse data exists or is still syncing, but coverage is not yet sufficient for the enabled Opportunity Engine rules."
               : null,
           consecutive_failures: 0,
           updated_at: new Date().toISOString(),
