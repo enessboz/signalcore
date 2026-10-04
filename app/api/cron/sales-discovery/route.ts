@@ -4,6 +4,7 @@ import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -58,6 +59,13 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "sales-discovery",
+    ownerIds: (campaigns || []).map((item) => item.owner_id),
+    metadata: { campaigns_checked: campaigns?.length || 0 },
+  });
 
   const due = (campaigns || []).filter((campaign) => {
     if (!campaign.schedule_kind) return false;
@@ -141,6 +149,34 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  const failedCount = results.filter((item) => item.status === "failed").length;
+  const partialCount = results.filter((item) => item.status === "partial").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+      partial: partialCount,
+    }),
+    metrics: {
+      checked: campaigns?.length || 0,
+      due: due.length,
+      processed: results.length,
+      failed: failedCount,
+      partial: partialCount,
+      discovery_cost: results.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            (item.discovery as { actualCost?: number } | undefined)?.actualCost || 0,
+          ),
+        0,
+      ),
+    },
+  });
 
   return NextResponse.json({
     checked: campaigns?.length || 0,
