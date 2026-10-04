@@ -308,7 +308,6 @@ export async function renderPptx(output: StoredOutput) {
       bold: true,
       color: "111827",
       margin: 0,
-      breakLine: false,
     });
 
     const keyMessage = clean(spec.key_message);
@@ -323,7 +322,6 @@ export async function renderPptx(output: StoredOutput) {
         color: "374151",
         margin: 0,
         valign: "top",
-        breakLine: false,
         fit: "shrink",
       });
     }
@@ -343,11 +341,9 @@ export async function renderPptx(output: StoredOutput) {
           fontFace: "Arial",
           fontSize: 17,
           color: "111827",
-          breakLine: false,
           fit: "shrink",
           valign: "top",
           margin: 0,
-          breakLineOnOverflow: false,
         },
       );
     }
@@ -365,7 +361,6 @@ export async function renderPptx(output: StoredOutput) {
         fontSize: 9,
         color: "6B7280",
         margin: 0,
-        breakLine: false,
         fit: "shrink",
       });
     }
