@@ -279,11 +279,9 @@ export async function renderPptx(output: StoredOutput) {
   pptx.company = "SignalCore";
   pptx.subject = output.title;
   pptx.title = output.title;
-  pptx.lang = "en-US";
   pptx.theme = {
     headFontFace: "Arial",
     bodyFontFace: "Arial",
-    lang: "en-US",
   };
 
   const contractSlides = output.data?.deliverable_contract?.slides;
