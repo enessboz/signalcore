@@ -36,11 +36,31 @@ export type AgentProjectContext = {
     resource_id: string;
     display_name: string | null;
   }>;
+  latest_crawl: null | {
+    id: string;
+    crawl_type: string;
+    status: string;
+    summary: Record<string, unknown>;
+    completed_at: string | null;
+    pages: Array<{
+      url: string;
+      status_code: number | null;
+      title: string | null;
+      canonical: string | null;
+      robots_meta: string | null;
+      h1s: unknown;
+      word_count: number;
+      internal_link_count: number;
+      structured_data_count: number;
+      fetch_error: string | null;
+    }>;
+  };
   manifest: {
     fact_count: number;
     background_chunk_count: number;
     finding_count: number;
     binding_count: number;
+    crawl_page_count: number;
   };
 };
 
@@ -77,6 +97,7 @@ export async function buildAgentProjectContext(
     { data: background },
     { data: findings },
     { data: bindings },
+    { data: latestCrawl },
   ] = await Promise.all([
     supabase
       .from("project_facts")
@@ -101,7 +122,38 @@ export async function buildAgentProjectContext(
       .from("project_bindings")
       .select("binding_type, connection_resources(resource_id,display_name)")
       .eq("project_id", projectId),
+    supabase
+      .from("crawl_runs")
+      .select("id,crawl_type,status,summary,completed_at")
+      .eq("project_id", projectId)
+      .in("status", ["succeeded", "partial"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  let crawlPages: Array<{
+    url: string;
+    status_code: number | null;
+    title: string | null;
+    canonical: string | null;
+    robots_meta: string | null;
+    h1s: unknown;
+    word_count: number;
+    internal_link_count: number;
+    structured_data_count: number;
+    fetch_error: string | null;
+  }> = [];
+
+  if (latestCrawl?.id) {
+    const { data } = await supabase
+      .from("crawl_pages")
+      .select("url,status_code,title,canonical,robots_meta,h1s,word_count,internal_link_count,structured_data_count,fetch_error")
+      .eq("crawl_run_id", latestCrawl.id)
+      .order("word_count", { ascending: false })
+      .limit(30);
+    crawlPages = data || [];
+  }
 
   const normalizedBindings = (bindings || []).map((binding) => {
     const resource = Array.isArray(binding.connection_resources)
@@ -137,11 +189,22 @@ export async function buildAgentProjectContext(
       metadata: (finding.metadata || {}) as Record<string, unknown>,
     })),
     bindings: normalizedBindings,
+    latest_crawl: latestCrawl
+      ? {
+          id: latestCrawl.id,
+          crawl_type: latestCrawl.crawl_type,
+          status: latestCrawl.status,
+          summary: (latestCrawl.summary || {}) as Record<string, unknown>,
+          completed_at: latestCrawl.completed_at,
+          pages: crawlPages,
+        }
+      : null,
     manifest: {
       fact_count: facts?.length || 0,
       background_chunk_count: background?.length || 0,
       finding_count: findings?.length || 0,
       binding_count: normalizedBindings.length,
+      crawl_page_count: crawlPages.length,
     },
   };
 }
@@ -154,6 +217,7 @@ export function contextToPrompt(context: AgentProjectContext) {
     background: context.background,
     open_findings: context.findings,
     connected_resources: context.bindings,
+    latest_crawl: context.latest_crawl,
   };
 
   return JSON.stringify(compact, null, 2);
