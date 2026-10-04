@@ -1084,6 +1084,7 @@ async function crawlWithDiscovery(input: {
   origin: string;
   sitemapUrls: string[];
   maxUrls: number;
+  deadlineAt?: number;
 }) {
   const home = new URL("/", input.origin).toString();
   const priorityQueue: string[] = [home];
@@ -1093,8 +1094,14 @@ async function crawlWithDiscovery(input: {
   const queued = new Set<string>([normalizeUrl(home)]);
   const requested = new Set<string>();
   const pages: CrawledPage[] = [];
+  let runtimeLimited = false;
 
   while (pages.length < input.maxUrls) {
+    if (input.deadlineAt && Date.now() >= input.deadlineAt) {
+      runtimeLimited = true;
+      break;
+    }
+
     const batch: string[] = [];
 
     while (batch.length < 5 && pages.length + batch.length < input.maxUrls) {
@@ -1119,6 +1126,11 @@ async function crawlWithDiscovery(input: {
 
     if (!batch.length) break;
 
+    if (input.deadlineAt && Date.now() >= input.deadlineAt) {
+      runtimeLimited = true;
+      break;
+    }
+
     const crawled = await mapLimit(batch, 5, (url) =>
       crawlPage(url, input.origin),
     );
@@ -1135,7 +1147,7 @@ async function crawlWithDiscovery(input: {
     }
   }
 
-  return pages;
+  return { pages, runtimeLimited };
 }
 
 function buildGraphState(
@@ -1251,11 +1263,18 @@ export async function runProjectCrawl(input: {
   projectId: string;
   maxUrls?: number;
   crawlType?: CrawlType;
+  maxRuntimeMs?: number;
   client?: SupabaseClient;
 }) {
   const supabase = input.client || (await createClient());
   const maxUrls = Math.min(Math.max(input.maxUrls || 100, 1), 500);
   const crawlType = input.crawlType || "http";
+  const startedAtMs = Date.now();
+  const maxRuntimeMs = Math.min(
+    Math.max(input.maxRuntimeMs || 210_000, 30_000),
+    240_000,
+  );
+  const crawlDeadlineAt = startedAtMs + maxRuntimeMs;
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -1298,12 +1317,14 @@ export async function runProjectCrawl(input: {
       Math.min(maxUrls * 3, 1500),
     );
 
-    const pages = await crawlWithDiscovery({
+    const crawlResult = await crawlWithDiscovery({
       seedUrl,
       origin: discovery.origin,
       sitemapUrls: discovery.sitemapUrls,
       maxUrls,
+      deadlineAt: crawlDeadlineAt,
     });
+    const pages = crawlResult.pages;
 
     const states = buildGraphState(
       pages,
@@ -1535,6 +1556,14 @@ export async function runProjectCrawl(input: {
 
     const summary = {
       crawler_version: "raw-http-v2",
+      runtime_budget_ms: maxRuntimeMs,
+      runtime_limited: crawlResult.runtimeLimited,
+      elapsed_ms: Date.now() - startedAtMs,
+      completion_reason: crawlResult.runtimeLimited
+        ? "runtime_budget"
+        : states.length >= maxUrls
+          ? "max_urls"
+          : "discovery_exhausted",
       sitemap_count: discovery.sitemapCount,
       sitemap_urls_discovered: discovery.sitemapUrls.length,
       sitemap_urls_not_crawled_in_sample: Math.max(
@@ -1589,7 +1618,11 @@ export async function runProjectCrawl(input: {
       .from("crawl_runs")
       .update({
         status:
-          errors === states.length && states.length ? "partial" : "succeeded",
+          crawlResult.runtimeLimited ||
+          states.length === 0 ||
+          (errors === states.length && states.length > 0)
+            ? "partial"
+            : "succeeded",
         pages_discovered: states.length,
         pages_crawled: states.length,
         error_count: errors,
