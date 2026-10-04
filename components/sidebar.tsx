@@ -7,6 +7,7 @@ const sections = [
   ["Global Brain", "/brain"],
   ["Projects", "/projects"],
   ["Agents", "/agents"],
+  ["Agent UAT", "/agent-uat"],
   ["Opportunities", "/opportunities"],
   ["Outputs", "/outputs"],
   ["Output Profiles", "/output-profiles"],
