@@ -7,6 +7,7 @@ const sections = [
   ["Projects", "/projects"],
   ["Agents", "/agents"],
   ["Opportunities", "/opportunities"],
+  ["Outputs", "/outputs"],
   ["Issues & Regressions", "/issues"],
   ["Sales", "/sales"],
   ["Automations", "/automations"],
