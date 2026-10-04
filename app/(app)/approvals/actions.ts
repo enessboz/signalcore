@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { executeApprovedAction } from "@/lib/approvals/executors";
 
 async function decideApproval(
   approvalId: string,
@@ -59,7 +60,7 @@ async function decideApproval(
 
   revalidatePath("/approvals");
   revalidatePath("/team");
-  redirect(`/approvals?message=${encodeURIComponent(`Approval ${decision}`)}`);
+  redirect(`/approvals?status=${decision === "approved" ? "approved" : decision}&message=${encodeURIComponent(`Approval ${decision}`)}`);
 }
 
 export async function approveAction(approvalId: string) {
@@ -72,4 +73,29 @@ export async function rejectAction(approvalId: string) {
 
 export async function cancelAction(approvalId: string) {
   return decideApproval(approvalId, "cancelled");
+}
+
+
+export async function executeAction(approvalId: string) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (!ownerId) redirect("/login");
+
+  try {
+    await executeApprovedAction({
+      ownerId,
+      approvalId,
+      client: supabase,
+    });
+    revalidatePath("/approvals");
+    revalidatePath("/outputs");
+    redirect("/approvals?status=approved&message=Action%20executed");
+  } catch (error) {
+    redirect(
+      `/approvals?status=approved&error=${encodeURIComponent(
+        error instanceof Error ? error.message : "Execution failed",
+      )}`,
+    );
+  }
 }
