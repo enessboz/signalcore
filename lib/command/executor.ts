@@ -10,6 +10,8 @@ import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
 import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForLead } from "@/lib/sales/prospect";
 import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
+import { runRankTrackingBatch, seedTrackedKeywordsFromGsc } from "@/lib/seo/rank-tracking";
+import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
 
 type ChiefAction = ChiefPlan["actions"][number];
 
@@ -581,6 +583,12 @@ export async function executeChiefActions(input: {
           "convert_project_to_client",
           "create_technical_crawl_schedule",
           "manage_technical_crawl_schedule",
+          "configure_rank_tracking",
+          "add_tracked_keywords",
+          "seed_rank_from_gsc",
+          "run_rank_tracking",
+          "configure_opportunity_engine",
+          "run_opportunity_scan",
         ].includes(action.type) &&
         !projectId
       ) {
@@ -979,6 +987,319 @@ export async function executeChiefActions(input: {
             status +
             ".",
           data: { schedule_id: target.id, status },
+        });
+        continue;
+      }
+
+      if (action.type === "configure_rank_tracking") {
+        const { data: existing } = await supabase
+          .from("rank_tracking_settings")
+          .select("active,auto_discover_enabled,auto_findings_enabled,max_auto_keywords,min_impressions_28d,position_min,position_max,default_location_code,default_language_code,default_device,daily_high_priority_limit")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .maybeSingle();
+
+        const positionMin = action.position_min ?? Number(existing?.position_min ?? 1);
+        const positionMax = action.position_max ?? Number(existing?.position_max ?? 30);
+        if (positionMax < positionMin) {
+          throw new Error("Rank tracking position_max must be greater than or equal to position_min.");
+        }
+
+        const { error } = await supabase.from("rank_tracking_settings").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            active: action.enabled ?? existing?.active ?? true,
+            auto_discover_enabled:
+              action.rank_auto_discover ?? existing?.auto_discover_enabled ?? false,
+            auto_findings_enabled:
+              action.rank_auto_findings ?? existing?.auto_findings_enabled ?? true,
+            max_auto_keywords:
+              action.max_auto_keywords ?? existing?.max_auto_keywords ?? 100,
+            min_impressions_28d:
+              action.min_impressions ?? existing?.min_impressions_28d ?? 100,
+            position_min: positionMin,
+            position_max: positionMax,
+            default_location_code:
+              action.location_code ?? existing?.default_location_code ?? 2840,
+            default_language_code:
+              action.language_code ?? existing?.default_language_code ?? "en",
+            default_device:
+              action.rank_device ?? existing?.default_device ?? "desktop",
+            daily_high_priority_limit:
+              action.daily_high_priority_limit ??
+              existing?.daily_high_priority_limit ??
+              20,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "project_id" },
+        );
+
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Rank Tracking settings updated" +
+            (action.rank_auto_discover ? " with GSC auto-discovery enabled." : "."),
+          data: {
+            active: action.enabled ?? existing?.active ?? true,
+            auto_discover:
+              action.rank_auto_discover ?? existing?.auto_discover_enabled ?? false,
+            max_auto_keywords:
+              action.max_auto_keywords ?? existing?.max_auto_keywords ?? 100,
+            position_range: [positionMin, positionMax],
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "add_tracked_keywords") {
+        const keywords = Array.from(
+          new Set(
+            (action.keywords || [])
+              .map((keyword) => keyword.trim())
+              .filter(Boolean),
+          ),
+        ).slice(0, 50);
+
+        if (!keywords.length) {
+          throw new Error("At least one keyword is required for Rank Tracking.");
+        }
+
+        const { data: settings } = await supabase
+          .from("rank_tracking_settings")
+          .select("default_location_code,default_language_code,default_device")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .maybeSingle();
+
+        const rows = keywords.map((keyword) => ({
+          project_id: projectId!,
+          owner_id: input.ownerId,
+          keyword,
+          source: "manual",
+          priority: action.rank_priority || "normal",
+          cadence: action.rank_cadence || "weekly",
+          depth: action.rank_depth || 30,
+          location_code:
+            action.location_code ?? settings?.default_location_code ?? 2840,
+          language_code:
+            action.language_code ?? settings?.default_language_code ?? "en",
+          device: action.rank_device ?? settings?.default_device ?? "desktop",
+          active: true,
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { error } = await supabase.from("tracked_keywords").upsert(rows, {
+          onConflict: "project_id,keyword,location_code,language_code,device",
+        });
+        if (error) throw new Error(error.message);
+
+        await supabase.from("rank_tracking_settings").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "project_id" },
+        );
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Added " +
+            String(keywords.length) +
+            " keyword(s) to Rank Tracking.",
+          data: { keywords },
+        });
+        continue;
+      }
+
+      if (action.type === "seed_rank_from_gsc") {
+        const seeded = await seedTrackedKeywordsFromGsc({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "GSC Rank Tracker seed completed: " +
+            String(seeded.inserted) +
+            " new keyword(s) from " +
+            String(seeded.candidates) +
+            " candidate(s).",
+          data: seeded,
+        });
+        continue;
+      }
+
+      if (action.type === "run_rank_tracking") {
+        let keywordIds: string[] | undefined;
+
+        if ((action.keywords || []).length) {
+          const requested = new Set(
+            action.keywords.map((keyword) => keyword.trim().toLowerCase()),
+          );
+          const { data: rows, error } = await supabase
+            .from("tracked_keywords")
+            .select("id,keyword")
+            .eq("project_id", projectId!)
+            .eq("owner_id", input.ownerId)
+            .eq("active", true)
+            .limit(1000);
+          if (error) throw new Error(error.message);
+
+          keywordIds = (rows || [])
+            .filter((row) => requested.has(row.keyword.trim().toLowerCase()))
+            .map((row) => row.id);
+
+          if (!keywordIds.length) {
+            throw new Error(
+              "None of the requested keywords are currently tracked in this project.",
+            );
+          }
+        }
+
+        const rankRun = await runRankTrackingBatch({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          keywordIds,
+          triggerType: "chief",
+          limit: keywordIds?.length || 10,
+          onlyDue: false,
+          client: supabase,
+        });
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Rank check completed: " +
+            String(rankRun.succeeded) +
+            " succeeded, " +
+            String(rankRun.failed) +
+            " failed, cost $" +
+            Number(rankRun.actualCost || 0).toFixed(4) +
+            ".",
+          data: {
+            run_id: rankRun.runId,
+            requested: rankRun.requested,
+            succeeded: rankRun.succeeded,
+            failed: rankRun.failed,
+            actual_cost: rankRun.actualCost,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "configure_opportunity_engine") {
+        const { data: existing } = await supabase
+          .from("opportunity_scan_settings")
+          .select("enabled,scan_gsc,scan_ga4,scan_rank,cadence")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .maybeSingle();
+
+        const enabled = action.enabled ?? existing?.enabled ?? true;
+        const scanGsc = action.scan_gsc ?? existing?.scan_gsc ?? true;
+        const scanGa4 = action.scan_ga4 ?? existing?.scan_ga4 ?? true;
+        const scanRank = action.scan_rank ?? existing?.scan_rank ?? true;
+
+        if (enabled && !scanGsc && !scanGa4 && !scanRank) {
+          throw new Error(
+            "Opportunity Engine requires at least one enabled evidence source.",
+          );
+        }
+
+        const { error } = await supabase.from("opportunity_scan_settings").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            enabled,
+            scan_gsc: scanGsc,
+            scan_ga4: scanGa4,
+            scan_rank: scanRank,
+            cadence: action.opportunity_cadence ?? existing?.cadence ?? "daily",
+            last_status: enabled ? "idle" : "paused",
+            last_error: null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "project_id" },
+        );
+        if (error) throw new Error(error.message);
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Opportunity Engine " +
+            (enabled ? "enabled" : "paused") +
+            " for the project.",
+          data: {
+            enabled,
+            scan_gsc: scanGsc,
+            scan_ga4: scanGa4,
+            scan_rank: scanRank,
+            cadence: action.opportunity_cadence ?? existing?.cadence ?? "daily",
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "run_opportunity_scan") {
+        const { data: settings } = await supabase
+          .from("opportunity_scan_settings")
+          .select("scan_gsc,scan_ga4,scan_rank")
+          .eq("project_id", projectId!)
+          .eq("owner_id", input.ownerId)
+          .maybeSingle();
+
+        const scan = await detectWarehouseOpportunities({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          scanGsc: settings?.scan_gsc !== false,
+          scanGa4: settings?.scan_ga4 !== false,
+          scanRank: settings?.scan_rank !== false,
+          client: supabase,
+        });
+
+        await supabase.from("opportunity_scan_settings").upsert(
+          {
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            last_run_at: new Date().toISOString(),
+            last_data_date: scan.dataDate,
+            last_status:
+              scan.gscAvailable || scan.ga4Available ? "succeeded" : "partial",
+            last_error: null,
+            consecutive_failures: 0,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "project_id" },
+        );
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Opportunity scan completed: " +
+            String(scan.candidates) +
+            " candidates, " +
+            String(scan.high) +
+            " high importance.",
+          data: scan,
         });
         continue;
       }
