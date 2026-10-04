@@ -19,6 +19,12 @@ type ChiefAction = {
     | "convert_project_to_client"
     | "create_technical_crawl_schedule"
     | "manage_technical_crawl_schedule"
+    | "configure_rank_tracking"
+    | "add_tracked_keywords"
+    | "seed_rank_from_gsc"
+    | "run_rank_tracking"
+    | "configure_opportunity_engine"
+    | "run_opportunity_scan"
     | "create_sales_campaign"
     | "run_sales_campaign"
     | "qualify_sales_campaign"
@@ -81,6 +87,21 @@ type ChiefAction = {
   max_run_cost: number | null;
   auto_qualify_count: number | null;
   crawl_mode: "http" | "delta" | null;
+  rank_auto_discover: boolean | null;
+  rank_auto_findings: boolean | null;
+  rank_priority: "high" | "normal" | "low" | null;
+  rank_cadence: "daily" | "weekly" | "monthly" | null;
+  rank_device: "desktop" | "mobile" | null;
+  rank_depth: number | null;
+  max_auto_keywords: number | null;
+  min_impressions: number | null;
+  position_min: number | null;
+  position_max: number | null;
+  daily_high_priority_limit: number | null;
+  scan_gsc: boolean | null;
+  scan_ga4: boolean | null;
+  scan_rank: boolean | null;
+  opportunity_cadence: "daily" | "weekly" | null;
 };
 
 export type ChiefPlan = {
@@ -173,6 +194,21 @@ const actionSchema = {
     "max_run_cost",
     "auto_qualify_count",
     "crawl_mode",
+    "rank_auto_discover",
+    "rank_auto_findings",
+    "rank_priority",
+    "rank_cadence",
+    "rank_device",
+    "rank_depth",
+    "max_auto_keywords",
+    "min_impressions",
+    "position_min",
+    "position_max",
+    "daily_high_priority_limit",
+    "scan_gsc",
+    "scan_ga4",
+    "scan_rank",
+    "opportunity_cadence",
   ],
   properties: {
     type: {
@@ -197,6 +233,12 @@ const actionSchema = {
         "convert_project_to_client",
         "create_technical_crawl_schedule",
         "manage_technical_crawl_schedule",
+        "configure_rank_tracking",
+        "add_tracked_keywords",
+        "seed_rank_from_gsc",
+        "run_rank_tracking",
+        "configure_opportunity_engine",
+        "run_opportunity_scan",
         "create_sales_campaign",
         "run_sales_campaign",
         "qualify_sales_campaign",
@@ -302,6 +344,45 @@ const actionSchema = {
       type: ["string", "null"],
       enum: ["http", "delta", null],
     },
+    rank_auto_discover: { type: ["boolean", "null"] },
+    rank_auto_findings: { type: ["boolean", "null"] },
+    rank_priority: {
+      type: ["string", "null"],
+      enum: ["high", "normal", "low", null],
+    },
+    rank_cadence: {
+      type: ["string", "null"],
+      enum: ["daily", "weekly", "monthly", null],
+    },
+    rank_device: {
+      type: ["string", "null"],
+      enum: ["desktop", "mobile", null],
+    },
+    rank_depth: {
+      type: ["integer", "null"],
+      minimum: 10,
+      maximum: 100,
+    },
+    max_auto_keywords: {
+      type: ["integer", "null"],
+      minimum: 0,
+      maximum: 1000,
+    },
+    min_impressions: { type: ["integer", "null"], minimum: 0 },
+    position_min: { type: ["number", "null"], minimum: 0 },
+    position_max: { type: ["number", "null"], minimum: 0 },
+    daily_high_priority_limit: {
+      type: ["integer", "null"],
+      minimum: 0,
+      maximum: 200,
+    },
+    scan_gsc: { type: ["boolean", "null"] },
+    scan_ga4: { type: ["boolean", "null"] },
+    scan_rank: { type: ["boolean", "null"] },
+    opportunity_cadence: {
+      type: ["string", "null"],
+      enum: ["daily", "weekly", null],
+    },
   },
 };
 
@@ -354,7 +435,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. You may configure project Rank Tracking, add explicit tracked keywords, seed a cost-controlled keyword universe from the GSC warehouse, and run rank checks. Rank checks are paid SERP operations and must remain subject to project SERP budget hard stops. You may configure or manually run the deterministic Opportunity Engine over GSC/GA4/rank evidence. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
