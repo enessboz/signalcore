@@ -644,3 +644,57 @@ button, input, textarea { font: inherit; }
 @media (max-width: 520px) {
   .budgetForm { grid-template-columns: 1fr; }
 }
+
+.salesRuntimeBadges { display: flex; gap: 8px; align-items: center; }
+.salesRuntimeBadges span { font-size: 8px; font-weight: 700; border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px; background: white; }
+.salesTopGrid { align-items: start; }
+.salesCampaignForm { display: grid; gap: 12px; }
+.salesCampaignList { display: grid; gap: 10px; }
+.salesCampaignCard { border: 1px solid var(--line); border-radius: 10px; background: white; padding: 12px; }
+.salesCampaignTop { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.salesCampaignTop h3 { margin: 3px 0 0; font-size: 11px; }
+.salesCampaignMeta { display: flex; flex-wrap: wrap; gap: 7px; margin: 9px 0; color: var(--muted); font-size: 7px; }
+.salesQueryPreview { display: flex; flex-wrap: wrap; gap: 5px; }
+.salesQueryPreview span { background: #f2f4f7; border-radius: 999px; padding: 4px 6px; font-size: 7px; color: #475467; }
+.salesRunSummary { border-top: 1px solid var(--line); margin-top: 9px; padding-top: 9px; display: grid; gap: 2px; }
+.salesRunSummary strong { font-size: 8px; }
+.salesRunSummary span { color: var(--muted); font-size: 8px; line-height: 1.4; }
+.salesCampaignCard form { margin: 0; }
+
+.salesPipelinePanel { margin-top: 16px; }
+.salesStageStrip { display: grid; grid-template-columns: repeat(10,minmax(72px,1fr)); gap: 6px; overflow-x: auto; }
+.salesStage { min-width: 72px; border: 1px solid var(--line); border-radius: 9px; background: white; padding: 9px; display: grid; gap: 2px; text-decoration: none; }
+.salesStage strong { font-size: 12px; color: var(--text); }
+.salesStage span { color: var(--muted); font-size: 7px; text-transform: capitalize; }
+.salesStage.active { border-color: #8098f9; background: #f5f8ff; }
+
+.salesLeadList { display: grid; gap: 10px; }
+.salesLeadCard { border: 1px solid var(--line); border-radius: 11px; background: white; padding: 13px; }
+.salesLeadHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.salesLeadIdentity { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.salesLeadIdentity h3 { margin: 3px 0 2px; font-size: 12px; }
+.salesLeadIdentity a { font-size: 8px; color: var(--muted); }
+.salesScore { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 999px; display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+.salesScoreHot { background: #ecfdf3; color: #067647; }
+.salesScoreWarm { background: #fff7ed; color: #b54708; }
+.salesScoreCool { background: #f2f4f7; color: #475467; }
+.salesLeadBadges { display: flex; gap: 5px; flex-wrap: wrap; justify-content: end; }
+.salesLeadEvidenceGrid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-top: 11px; }
+.salesLeadEvidenceGrid > div { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); padding: 9px; display: grid; gap: 3px; min-width: 0; }
+.salesLeadEvidenceGrid strong { font-size: 8px; }
+.salesLeadEvidenceGrid span { font-size: 8px; overflow-wrap: anywhere; }
+.salesLeadEvidenceGrid small { color: var(--muted); font-size: 7px; line-height: 1.4; overflow-wrap: anywhere; }
+.salesLeadActions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line); }
+.salesLeadActions form { margin: 0; }
+.salesStageForm { margin-left: auto !important; display: flex; gap: 6px; align-items: center; }
+.salesStageForm select { border: 1px solid var(--line); border-radius: 7px; background: white; padding: 7px 8px; font-size: 8px; }
+
+@media (max-width: 1050px) {
+  .salesLeadEvidenceGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 720px) {
+  .salesLeadHeader { flex-direction: column; }
+  .salesLeadBadges { justify-content: start; }
+  .salesLeadEvidenceGrid { grid-template-columns: 1fr; }
+  .salesStageForm { margin-left: 0 !important; width: 100%; }
+}
