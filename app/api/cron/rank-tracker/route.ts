@@ -64,7 +64,6 @@ export async function POST(request: NextRequest) {
     .from("rank_tracking_settings")
     .select("project_id,owner_id,auto_discover_enabled,last_seeded_at,active")
     .eq("active", true)
-    .eq("auto_discover_enabled", true)
     .limit(100);
 
   if (settingsError) {
@@ -80,6 +79,7 @@ export async function POST(request: NextRequest) {
 
   const seedResults: Array<Record<string, unknown>> = [];
   for (const settings of autoSettings || []) {
+    if (!settings.auto_discover_enabled) continue;
     if (!olderThan(settings.last_seeded_at, 24 * 3600_000)) continue;
 
     try {
