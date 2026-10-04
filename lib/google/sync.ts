@@ -467,11 +467,13 @@ export async function enqueueGoogleSync(input: {
   const startDate = minIso(input.startDate, input.endDate);
   const endDate = maxIso(input.startDate, input.endDate);
 
+  const mode = input.mode || "incremental";
   const { data: existing } = await supabase
     .from("google_sync_queue")
     .select("id")
     .eq("project_id", input.projectId)
     .eq("source", input.source)
+    .eq("mode", mode)
     .in("status", ["queued", "running"])
     .limit(1)
     .maybeSingle();
@@ -484,7 +486,7 @@ export async function enqueueGoogleSync(input: {
       project_id: input.projectId,
       owner_id: input.ownerId,
       source: input.source,
-      mode: input.mode || "incremental",
+      mode,
       start_date: startDate,
       end_date: endDate,
       cursor_date: startDate,
