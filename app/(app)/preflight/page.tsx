@@ -91,6 +91,20 @@ export default async function PreflightPage() {
       detail: "Required only for paid rank tracking, SERP research and Sales Discovery.",
     },
     {
+      label: "PageSpeed / Core Web Vitals",
+      ready: Boolean(process.env.PAGESPEED_API_KEY),
+      required: false,
+      detail:
+        "PAGESPEED_API_KEY enables selective PSI samples after crawl completion.",
+    },
+    {
+      label: "Selective JS renderer",
+      ready: Boolean(process.env.JS_RENDER_ENDPOINT),
+      required: false,
+      detail:
+        "JS_RENDER_ENDPOINT enables headless rendering fallback. JS_RENDER_TOKEN is optional depending on the provider.",
+    },
+    {
       label: "Private GitHub context",
       ready: Boolean(process.env.GITHUB_TOKEN),
       required: false,
@@ -107,6 +121,11 @@ export default async function PreflightPage() {
     "generated_outputs",
     "budget_limits",
     "approvals",
+    "crawl_url_queue",
+    "crawl_robots_audits",
+    "crawl_performance_queue",
+    "crawl_performance_results",
+    "crawl_finding_reviews",
   ] as const;
 
   const tableResults = await Promise.all(
@@ -169,7 +188,7 @@ export default async function PreflightPage() {
       ready: Boolean(process.env.CRON_SECRET && process.env.SUPABASE_SECRET_KEY),
       required: true,
       detail:
-        "7 Vercel Cron routes are defined in vercel.json and require the shared cron secret.",
+        "9 protected Vercel Cron routes are defined, including the distributed crawl frontier and selective PageSpeed workers.",
     },
   ];
 
