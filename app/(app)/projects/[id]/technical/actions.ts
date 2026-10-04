@@ -219,3 +219,82 @@ export async function setTechnicalCrawlScheduleStatus(
       encodeURIComponent("Technical crawl schedule " + status),
   );
 }
+
+
+export async function reviewCrawlFinding(
+  projectId: string,
+  runId: string,
+  findingId: string,
+  verdict: "confirmed" | "false_positive" | "needs_context",
+  formData: FormData,
+) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const ownerId = claimsData?.claims?.sub;
+  if (!ownerId) redirect("/login");
+
+  const note =
+    typeof formData.get("note") === "string"
+      ? String(formData.get("note") || "").trim().slice(0, 1000)
+      : "";
+
+  const { data: finding, error: findingError } = await supabase
+    .from("findings")
+    .select("id,project_id,owner_id,metadata")
+    .eq("id", findingId)
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  const crawlRunId =
+    finding?.metadata &&
+    typeof finding.metadata === "object" &&
+    "crawl_run_id" in finding.metadata
+      ? String((finding.metadata as { crawl_run_id?: unknown }).crawl_run_id || "")
+      : "";
+
+  if (findingError || !finding || crawlRunId !== runId) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/technical?run=" +
+        encodeURIComponent(runId) +
+        "&error=" +
+        encodeURIComponent("Finding does not belong to the selected crawl run"),
+    );
+  }
+
+  const { error } = await supabase.from("crawl_finding_reviews").upsert(
+    {
+      crawl_run_id: runId,
+      finding_id: findingId,
+      project_id: projectId,
+      owner_id: ownerId,
+      verdict,
+      note: note || null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "crawl_run_id,finding_id,owner_id" },
+  );
+
+  if (error) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/technical?run=" +
+        encodeURIComponent(runId) +
+        "&error=" +
+        encodeURIComponent(error.message),
+    );
+  }
+
+  revalidatePath("/projects/" + projectId + "/technical");
+  redirect(
+    "/projects/" +
+      projectId +
+      "/technical?run=" +
+      encodeURIComponent(runId) +
+      "&message=" +
+      encodeURIComponent("Finding review saved"),
+  );
+}
