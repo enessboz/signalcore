@@ -698,3 +698,12 @@ button, input, textarea { font: inherit; }
   .salesLeadEvidenceGrid { grid-template-columns: 1fr; }
   .salesStageForm { margin-left: 0 !important; width: 100%; }
 }
+
+.approvalExecutor { margin-top: 12px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; padding: 9px 10px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.approvalExecutor > div { display: grid; gap: 3px; }
+.approvalExecutor strong { font-size: 8px; }
+.approvalExecutor span { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.outputDocument + form, .pageHeader form { margin: 0; }
+@media (max-width: 680px) {
+  .approvalExecutor { align-items: flex-start; flex-direction: column; }
+}
