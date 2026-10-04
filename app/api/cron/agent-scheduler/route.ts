@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { executeAgentTask } from "@/lib/agents/runtime";
 import { isScheduleDue, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createReportingOutput, type OutputFormat } from "@/lib/outputs/reporting";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
   const { data: tasks, error } = await supabase
     .from("scheduled_tasks")
-    .select("id,owner_id,project_id,title,instruction,target_agent_key,schedule_kind,schedule_config,timezone,status,last_run_at,failure_count")
+    .select("id,owner_id,project_id,title,instruction,target_agent_key,schedule_kind,schedule_config,post_run_config,timezone,status,last_run_at,failure_count")
     .eq("status", "active")
     .order("created_at", { ascending: true })
     .limit(100);
@@ -94,6 +95,46 @@ export async function POST(request: NextRequest) {
         client: supabase,
       });
 
+      const postRun = (task.post_run_config || {}) as {
+        report_on_importance?: boolean;
+        minimum_importance?: "critical" | "high" | "medium" | "low";
+        report_format?: OutputFormat;
+      };
+
+      let generatedOutput: { outputId: string; title: string } | null = null;
+
+      if (postRun.report_on_importance) {
+        const { data: completedRun } = await supabase
+          .from("agent_runs")
+          .select("output")
+          .eq("id", runId)
+          .maybeSingle();
+
+        const runOutput = (completedRun?.output || {}) as {
+          importance?: "critical" | "high" | "medium" | "low";
+        };
+
+        const rank = { low: 1, medium: 2, high: 3, critical: 4 };
+        const currentImportance = runOutput.importance || "low";
+        const threshold = postRun.minimum_importance || "high";
+
+        if (rank[currentImportance] >= rank[threshold]) {
+          const report = await createReportingOutput({
+            ownerId: task.owner_id,
+            projectId: task.project_id,
+            format: postRun.report_format || "summary",
+            instruction:
+              `A scheduled analysis found ${currentImportance}-importance evidence. Prepare the requested follow-up output from the current approved findings and evidence. Scheduled task: ${task.title}. Original instruction: ${task.instruction}`,
+            triggerType: "scheduled",
+            client: supabase,
+          });
+          generatedOutput = {
+            outputId: report.outputId,
+            title: report.title,
+          };
+        }
+      }
+
       const nextStatus = task.schedule_kind === "once" ? "completed" : "active";
 
       await supabase
@@ -114,6 +155,7 @@ export async function POST(request: NextRequest) {
         title: task.title,
         status: "succeeded",
         run_id: runId,
+        generated_output: generatedOutput,
       });
     } catch (runError) {
       const failureCount = Number(task.failure_count || 0) + 1;
