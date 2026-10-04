@@ -120,7 +120,6 @@ async function writeRankFinding(input: {
         "A material exact-rank decline can confirm that a GSC visibility change is not only an averaging effect.",
       importance: changeImportance(previousPosition, currentPosition),
       confidence: "high",
-      status: "open",
       fingerprint: "rank:drop:" + keyword.id,
       affected_scope: {
         keyword: keyword.keyword,
@@ -157,7 +156,6 @@ async function writeRankFinding(input: {
         "Losing a previously visible exact SERP position is a stronger regression signal when confirmed alongside GSC or technical evidence.",
       importance: previousPosition <= 10 ? "high" : "medium",
       confidence: "high",
-      status: "open",
       fingerprint: "rank:lost:" + keyword.id,
       affected_scope: {
         keyword: keyword.keyword,
@@ -200,7 +198,6 @@ async function writeRankFinding(input: {
         "A ranking URL switch can reflect healthy intent ownership, URL replacement or potential internal competition and should be interpreted with GSC/query context.",
       importance: "medium",
       confidence: "high",
-      status: "open",
       fingerprint: "rank:url-switch:" + keyword.id,
       affected_scope: {
         keyword: keyword.keyword,
@@ -239,7 +236,6 @@ async function writeRankFinding(input: {
         "A newly achieved first-page position can be a useful moment to reinforce the ranking URL and improve click capture.",
       importance: currentPosition <= 3 ? "high" : "medium",
       confidence: "high",
-      status: "open",
       fingerprint: "rank:top10:" + keyword.id,
       affected_scope: {
         keyword: keyword.keyword,
@@ -424,15 +420,15 @@ export async function checkTrackedKeyword(input: {
     0,
   );
 
-  await assertBudgetAvailable({
-    ownerId: keyword.owner_id,
-    projectId: keyword.project_id,
-    category: "serp",
-    estimatedNextCost: conservativeRequestEstimate,
-    client: supabase,
-  });
-
   try {
+    await assertBudgetAvailable({
+      ownerId: keyword.owner_id,
+      projectId: keyword.project_id,
+      category: "serp",
+      estimatedNextCost: conservativeRequestEstimate,
+      client: supabase,
+    });
+
     const result = await fetchGoogleOrganicSerp({
       keyword: keyword.keyword,
       locationCode: keyword.location_code,
@@ -579,15 +575,18 @@ export async function checkTrackedKeyword(input: {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Rank tracking request failed.";
+    const budgetBlocked = /budget hard-stop reached/i.test(message);
     const failureCount = Number(keyword.consecutive_failures || 0) + 1;
 
     await supabase
       .from("tracked_keywords")
       .update({
-        last_checked_at: new Date().toISOString(),
-        last_status: "failed",
+        ...(budgetBlocked ? {} : { last_checked_at: new Date().toISOString() }),
+        last_status: budgetBlocked ? "paused" : "failed",
         last_error: message,
-        consecutive_failures: failureCount,
+        consecutive_failures: budgetBlocked
+          ? Number(keyword.consecutive_failures || 0)
+          : failureCount,
         updated_at: new Date().toISOString(),
       })
       .eq("id", keyword.id)
@@ -602,6 +601,7 @@ export async function checkTrackedKeyword(input: {
       previousPosition: null,
       cost: 0,
       error: message,
+      budgetBlocked,
     };
   }
 }
@@ -701,14 +701,14 @@ export async function runRankTrackingBatch(input: {
 
   const results = [];
   for (const row of rows) {
-    results.push(
-      await checkTrackedKeyword({
-        keyword: row,
-        projectDomain: project.domain,
-        autoFindings: settings?.auto_findings_enabled !== false,
-        client: supabase,
-      }),
-    );
+    const result = await checkTrackedKeyword({
+      keyword: row,
+      projectDomain: project.domain,
+      autoFindings: settings?.auto_findings_enabled !== false,
+      client: supabase,
+    });
+    results.push(result);
+    if ("budgetBlocked" in result && result.budgetBlocked) break;
   }
 
   const succeeded = results.filter((item) => item.success).length;
