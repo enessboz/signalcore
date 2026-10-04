@@ -64,6 +64,8 @@ export async function sendChiefCommand(formData: FormData) {
     { data: globalBrain },
     { data: outputProfiles },
     { data: budgetLimits },
+    { data: salesCampaigns },
+    { data: salesLeads },
   ] = await Promise.all([
     supabase
       .from("agent_definitions")
@@ -110,6 +112,17 @@ export async function sendChiefCommand(formData: FormData) {
       .from("budget_limits")
       .select("project_id,category,monthly_limit,soft_warning_percent,hard_stop")
       .eq("owner_id", ownerId),
+    supabase
+      .from("sales_campaigns")
+      .select("id,name,status,country,industry,location_code,language_code,min_score,max_candidates,max_run_cost_usd,auto_discovery_enabled,schedule_kind,schedule_config,timezone,auto_qualify_count,last_auto_run_at,last_auto_status")
+      .neq("status", "archived")
+      .order("updated_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("sales_leads")
+      .select("id,domain,company_name,country,industry,stage,qualification_status,score,converted_project_id,updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(120),
   ]);
 
   if (!chief || !["testing", "active"].includes(chief.status)) {
@@ -124,6 +137,8 @@ export async function sendChiefCommand(formData: FormData) {
       global_brain: globalBrain || [],
       output_profiles: outputProfiles || [],
       budget_limits: budgetLimits || [],
+      sales_campaigns: salesCampaigns || [],
+      sales_leads: salesLeads || [],
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
@@ -141,6 +156,13 @@ export async function sendChiefCommand(formData: FormData) {
         "add_project_background",
         "assign_output_profile",
         "set_budget_limit",
+        "create_sales_campaign",
+        "run_sales_campaign",
+        "qualify_sales_campaign",
+        "configure_sales_automation",
+        "convert_sales_lead",
+        "audit_sales_lead",
+        "create_sales_deck",
       ],
       safety: {
         external_impact_requires_approval: true,
