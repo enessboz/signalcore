@@ -15,7 +15,8 @@ alter table public.crawl_runs
   add column if not exists queue_completed_at timestamptz,
   add column if not exists robots_compliant boolean not null default true,
   add column if not exists js_render_mode text not null default 'off'
-    check (js_render_mode in ('off','auto','always'));
+    check (js_render_mode in ('off','auto','always')),
+  add column if not exists crawl_config jsonb not null default '{}'::jsonb;
 
 alter table public.technical_crawl_schedules
   drop constraint if exists technical_crawl_schedules_max_urls_check;
