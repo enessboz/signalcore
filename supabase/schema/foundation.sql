@@ -76,7 +76,7 @@ create table if not exists public.findings (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null,
   owner_id uuid not null,
-  finding_type text not null check (finding_type in ('issue','opportunity','strategy_discovery','regression','experiment_update','data_health')),
+  finding_type text not null check (finding_type in ('issue','opportunity','strategy_discovery','regression','observation','experiment_update','data_health')),
   title text not null,
   summary text not null,
   why_it_matters text,
