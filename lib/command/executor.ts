@@ -320,13 +320,85 @@ export async function executeChiefActions(input: {
           userRequest: `Prepare a ${format} output. ${task}`,
         });
 
+        const { data: completedRun } = await supabase
+          .from("agent_runs")
+          .select("output")
+          .eq("id", runId)
+          .maybeSingle();
+
+        const output = (completedRun?.output || {}) as {
+          summary?: string;
+          importance?: string;
+          confidence?: string;
+          findings?: Array<{
+            title?: string;
+            why_it_matters?: string;
+            recommended_action?: string;
+          }>;
+          next_actions?: string[];
+        };
+
+        const markdownParts = [
+          output.summary ? "# Executive Summary\n\n" + output.summary : "",
+          output.findings?.length
+            ? "\n\n# Findings\n\n" +
+              output.findings
+                .map(
+                  (finding, index) =>
+                    "## " +
+                    String(index + 1) +
+                    ". " +
+                    (finding.title || "Finding") +
+                    "\n\n" +
+                    (finding.why_it_matters || "") +
+                    (finding.recommended_action
+                      ? "\n\n**Recommended action:** " + finding.recommended_action
+                      : ""),
+                )
+                .join("\n\n")
+            : "",
+          output.next_actions?.length
+            ? "\n\n# Next Actions\n\n" +
+              output.next_actions.map((item) => "- " + item).join("\n")
+            : "",
+        ].filter(Boolean);
+
+        const { data: project } = await supabase
+          .from("projects")
+          .select("name")
+          .eq("id", projectId!)
+          .maybeSingle();
+
+        const { data: generated, error: outputError } = await supabase
+          .from("generated_outputs")
+          .insert({
+            project_id: projectId!,
+            owner_id: input.ownerId,
+            agent_run_id: runId,
+            output_type: format,
+            title:
+              (project?.name || "Project") +
+              " · " +
+              format.charAt(0).toUpperCase() +
+              format.slice(1),
+            status: "draft",
+            body_markdown: markdownParts.join("") || output.summary || "",
+            data: output,
+          })
+          .select("id,title")
+          .single();
+
+        if (outputError || !generated) {
+          throw new Error(outputError?.message || "Generated output could not be saved.");
+        }
+
         results.push({
           type: action.type,
           status: "completed",
           projectId,
           targetAgentKey: "reporting_output",
-          summary: `Reporting Agent started a ${format} output.`,
-          data: { run_id: runId, format },
+          summary: `Reporting Agent created a ${format} draft: ${generated.title}.`,
+          data: { run_id: runId, output_id: generated.id, format },
         });
         continue;
       }
