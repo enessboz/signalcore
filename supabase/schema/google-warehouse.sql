@@ -35,6 +35,8 @@ create table if not exists public.google_sync_queue (
   status text not null default 'queued'
     check (status in ('queued','running','succeeded','partial','failed','cancelled')),
   priority integer not null default 50,
+  attempt_count integer not null default 0 check (attempt_count between 0 and 20),
+  last_attempt_at timestamptz,
   result jsonb not null default '{}'::jsonb,
   error text,
   created_at timestamptz not null default now(),
