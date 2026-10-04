@@ -36,6 +36,12 @@ export type AgentProjectContext = {
     resource_id: string;
     display_name: string | null;
   }>;
+  repositories: Array<{
+    repo_full_name: string;
+    default_branch: string | null;
+    access_mode: string;
+    status: string;
+  }>;
   latest_crawl: null | {
     id: string;
     crawl_type: string;
@@ -98,6 +104,7 @@ export async function buildAgentProjectContext(
     { data: findings },
     { data: bindings },
     { data: latestCrawl },
+    { data: repositories },
   ] = await Promise.all([
     supabase
       .from("project_facts")
@@ -130,6 +137,13 @@ export async function buildAgentProjectContext(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from("project_repositories")
+      .select("repo_full_name,default_branch,access_mode,status")
+      .eq("project_id", projectId)
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(4),
   ]);
 
   let crawlPages: Array<{
@@ -189,6 +203,7 @@ export async function buildAgentProjectContext(
       metadata: (finding.metadata || {}) as Record<string, unknown>,
     })),
     bindings: normalizedBindings,
+    repositories: repositories || [],
     latest_crawl: latestCrawl
       ? {
           id: latestCrawl.id,
@@ -217,6 +232,7 @@ export function contextToPrompt(context: AgentProjectContext) {
     background: context.background,
     open_findings: context.findings,
     connected_resources: context.bindings,
+    repository_bindings: context.repositories,
     latest_crawl: context.latest_crawl,
   };
 
