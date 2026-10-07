@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { runAgentAction } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -28,6 +29,8 @@ export default async function AgentsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const selectedProject = scalar(query.project);
   const selectedRunId = scalar(query.run);
   const supabase = await createClient();
@@ -101,14 +104,14 @@ export default async function AgentsPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">AI orchestration layer</p>
-          <h1>Agent Center</h1>
+          <p className="eyebrow">{tr ? "AI orkestrasyon katmanı" : "AI orchestration layer"}</p>
+          <h1>{tr ? "Agent Merkezi" : "Agent Center"}</h1>
           <p className="muted">
-            On-demand agents: deterministic data first, compact Project Brain context second, model reasoning only where it adds value.
+            {tr ? "İsteğe bağlı agentlar: önce deterministik veri, ardından kompakt Project Brain context; model reasoning yalnızca değer kattığı yerde." : "On-demand agents: deterministic data first, compact Project Brain context second, model reasoning only where it adds value."}
           </p>
         </div>
         <span className={apiConfigured ? "connectionStatus connection-connected" : "connectionStatus connection-error"}>
-          {apiConfigured ? "OpenAI ready" : "API key required"}
+          {apiConfigured ? (tr ? "OpenAI hazır" : "OpenAI ready") : (tr ? "API key gerekli" : "API key required")}
         </span>
       </header>
 
@@ -125,18 +128,18 @@ export default async function AgentsPage({
       ) : null}
 
       <section className="agentStats">
-        <article><span>Ready for testing</span><strong>{testingAgents.length + activeAgents.length}</strong><small>Router + core specialists</small></article>
-        <article><span>Planned agents</span><strong>{plannedAgents.length}</strong><small>Activated as data/services mature</small></article>
-        <article><span>Recent runs</span><strong>{recentRuns?.length || 0}</strong><small>Latest 30 executions</small></article>
-        <article><span>Proposed handoffs</span><strong>{proposedHandoffs || 0}</strong><small>Specialist escalation requests</small></article>
+        <article><span>{tr ? "Teste hazır" : "Ready for testing"}</span><strong>{testingAgents.length + activeAgents.length}</strong><small>Router + core specialists</small></article>
+        <article><span>{tr ? "Planlanan agentlar" : "Planned agents"}</span><strong>{plannedAgents.length}</strong><small>Activated as data/services mature</small></article>
+        <article><span>{tr ? "Son çalışmalar" : "Recent runs"}</span><strong>{recentRuns?.length || 0}</strong><small>Latest 30 executions</small></article>
+        <article><span>{tr ? "Önerilen handofflar" : "Proposed handoffs"}</span><strong>{proposedHandoffs || 0}</strong><small>Specialist escalation requests</small></article>
       </section>
 
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Run an agent</h2>
+            <h2>{tr ? "Agent çalıştır" : "Run an agent"}</h2>
             <p>
-              Auto-route uses the cheap Router first. Direct mode skips routing and calls the chosen specialist.
+              {tr ? "Auto-route önce düşük maliyetli Routerı kullanır. Direct mode routingi atlayıp seçilen uzmanı çağırır." : "Auto-route uses the cheap Router first. Direct mode skips routing and calls the chosen specialist."}
             </p>
           </div>
         </div>
@@ -145,7 +148,7 @@ export default async function AgentsPage({
           <label>
             Project
             <select name="projectId" defaultValue={selectedProject} required>
-              <option value="" disabled>Select a project</option>
+              <option value="" disabled>{tr ? "Proje seç" : "Select a project"}</option>
               {(projects || []).map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name} · {project.project_type.replace("_", " ")}
@@ -179,7 +182,7 @@ export default async function AgentsPage({
           </label>
 
           <button className="primaryButton" type="submit" disabled={!apiConfigured}>
-            Run SignalCore Agent
+            {tr ? "SignalCore Agent çalıştır" : "Run SignalCore Agent"}
           </button>
         </form>
       </section>
