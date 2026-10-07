@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { approveAction, cancelAction, executeAction, rejectAction } from "./actions";
 import { getExecutorCapability } from "@/lib/approvals/executors";
 
@@ -21,6 +22,8 @@ export default async function ApprovalsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const status = scalar(query.status, "pending");
   const supabase = await createClient();
 
@@ -46,15 +49,15 @@ export default async function ApprovalsPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Human approval gate</p>
-          <h1>Approval Center</h1>
+          <p className="eyebrow">{tr ? "İnsan onay katmanı" : "Human approval gate"}</p>
+          <h1>{tr ? "Onay Merkezi" : "Approval Center"}</h1>
           <p className="muted">
-            External-impact actions stop here until you explicitly approve them.
+            {tr ? "Dış etkili aksiyonlar sen açıkça onaylayana kadar burada durur." : "External-impact actions stop here until you explicitly approve them."}
           </p>
         </div>
         <div className="approvalHeaderCount">
           <strong>{pendingCount}</strong>
-          <span>pending in this view</span>
+          <span>{tr ? "bu görünümde bekliyor" : "pending in this view"}</span>
         </div>
       </header>
 
@@ -65,17 +68,17 @@ export default async function ApprovalsPage({
       <section className="panel filterPanel">
         <form method="get" className="filterForm">
           <label>
-            Status
+            {tr ? "Durum" : "Status"}
             <select name="status" defaultValue={status}>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="pending">{tr ? "Bekleyen" : "Pending"}</option>
+              <option value="approved">{tr ? "Onaylandı" : "Approved"}</option>
+              <option value="rejected">{tr ? "Reddedildi" : "Rejected"}</option>
+              <option value="cancelled">{tr ? "İptal" : "Cancelled"}</option>
               <option value="expired">Expired</option>
-              <option value="all">All</option>
+              <option value="all">{tr ? "Tümü" : "All"}</option>
             </select>
           </label>
-          <button className="secondaryButton" type="submit">Apply</button>
+          <button className="secondaryButton" type="submit">{tr ? "Uygula" : "Apply"}</button>
         </form>
       </section>
 
@@ -150,7 +153,7 @@ export default async function ApprovalsPage({
                 {approval.status === "pending" ? (
                   <div className="approvalActions">
                     <form action={approveAction.bind(null, approval.id)}>
-                      <button className="primaryButton" type="submit">Approve</button>
+                      <button className="primaryButton" type="submit">{tr ? "Onayla" : "Approve"}</button>
                     </form>
                     <form action={rejectAction.bind(null, approval.id)}>
                       <button className="secondaryButton" type="submit">Reject</button>
