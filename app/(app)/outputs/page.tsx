@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 function scalar(value: string | string[] | undefined, fallback = "") {
@@ -12,6 +13,8 @@ export default async function OutputsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
   const projectFilter = scalar(query.project);
   const typeFilter = scalar(query.type);
@@ -37,13 +40,13 @@ export default async function OutputsPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Deliverables</p>
-          <h1>Outputs</h1>
+          <p className="eyebrow">{tr ? "Teslimatlar" : "Deliverables"}</p>
+          <h1>{tr ? "Çıktılar" : "Outputs"}</h1>
           <p className="muted">
-            Persistent report, presentation, task and email drafts produced by SignalCore agents.
+            {tr ? "SignalCore agentlarının oluşturduğu kalıcı rapor, sunum, task ve email taslakları." : "Persistent report, presentation, task and email drafts produced by SignalCore agents."}
           </p>
         </div>
-        <Link href="/command" className="primaryButton">Ask Chief Operator</Link>
+        <Link href="/command" className="primaryButton">{tr ? "Chief Operator'a sor" : "Ask Chief Operator"}</Link>
       </header>
 
       {error ? <p className="formMessage formError pageMessage">{error.message}</p> : null}
@@ -53,7 +56,7 @@ export default async function OutputsPage({
           <label>
             Project
             <select name="project" defaultValue={projectFilter}>
-              <option value="">All projects</option>
+              <option value="">{tr ? "Tüm projeler" : "All projects"}</option>
               {(projects || []).map((project) => (
                 <option key={project.id} value={project.id}>{project.name}</option>
               ))}
@@ -62,7 +65,7 @@ export default async function OutputsPage({
           <label>
             Format
             <select name="type" defaultValue={typeFilter}>
-              <option value="">All formats</option>
+              <option value="">{tr ? "Tüm formatlar" : "All formats"}</option>
               <option value="summary">Summary</option>
               <option value="document">Document</option>
               <option value="presentation">Presentation</option>
@@ -70,7 +73,7 @@ export default async function OutputsPage({
               <option value="email">Email</option>
             </select>
           </label>
-          <button className="secondaryButton" type="submit">Apply filters</button>
+          <button className="secondaryButton" type="submit">{tr ? "Filtreleri uygula" : "Apply filters"}</button>
         </form>
       </section>
 
