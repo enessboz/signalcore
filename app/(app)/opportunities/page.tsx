@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import {
   runWarehouseOpportunityScan,
   saveOpportunityAutomation,
@@ -22,6 +23,8 @@ export default async function OpportunitiesPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const projectFilter = scalar(query.project);
@@ -101,11 +104,10 @@ export default async function OpportunitiesPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Intelligence inbox</p>
-          <h1>Opportunities</h1>
+          <p className="eyebrow">{tr ? "İçgörü kutusu" : "Intelligence inbox"}</p>
+          <h1>{tr ? "Fırsatlar" : "Opportunities"}</h1>
           <p className="muted">
-            Deterministic SEO intelligence from GSC, GA4, rank history and technical evidence.
-            Findings explain why they matter before any action is taken.
+            {tr ? "GSC, GA4, rank geçmişi ve teknik kanıtlardan gelen deterministik SEO içgörüleri. Her bulgu, aksiyon alınmadan önce neden önemli olduğunu açıklar." : "Deterministic SEO intelligence from GSC, GA4, rank history and technical evidence. Findings explain why they matter before any action is taken."}
           </p>
         </div>
       </header>
@@ -117,7 +119,7 @@ export default async function OpportunitiesPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Automatic Opportunity Engine</h2>
+            <h2>{tr ? "Otomatik Opportunity Engine" : "Automatic Opportunity Engine"}</h2>
             <p>
               Warehouse-first detection. No model is required to collect or compare
               GSC/GA4/rank evidence.
@@ -126,7 +128,7 @@ export default async function OpportunitiesPage({
           {projectFilter ? (
             <form action={runWarehouseOpportunityScan.bind(null, projectFilter)}>
               <button className="primaryButton" type="submit">
-                Run selected project now
+                {tr ? "Seçili projeyi şimdi çalıştır" : "Run selected project now"}
               </button>
             </form>
           ) : null}
@@ -136,7 +138,7 @@ export default async function OpportunitiesPage({
           <label>
             Project
             <select name="projectId" required defaultValue={projectFilter}>
-              <option value="" disabled>Select project</option>
+              <option value="" disabled>{tr ? "Proje seç" : "Select project"}</option>
               {(projects || []).map((project) => (
                 <option key={project.id} value={project.id}>{project.name}</option>
               ))}
@@ -149,7 +151,7 @@ export default async function OpportunitiesPage({
               type="checkbox"
               defaultChecked={Boolean(selectedAutomation?.enabled)}
             />
-            Enable automation
+            {tr ? "Otomasyonu aç" : "Enable automation"}
           </label>
 
           <label className="checkboxLabel">
