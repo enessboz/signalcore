@@ -188,7 +188,7 @@ export default async function PreflightPage() {
       ready: Boolean(process.env.CRON_SECRET && process.env.SUPABASE_SECRET_KEY),
       required: true,
       detail:
-        "9 protected Vercel Cron routes are defined, including the distributed crawl frontier and selective PageSpeed workers.",
+        "Production workers are scheduled by Supabase pg_cron and authenticate to the protected Vercel worker routes with CRON_SECRET. Vercel Cron is intentionally unused on the Hobby plan.",
     },
   ];
 
