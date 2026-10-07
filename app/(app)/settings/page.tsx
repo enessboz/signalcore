@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 
 export default async function SettingsPage({
   searchParams,
@@ -8,6 +9,8 @@ export default async function SettingsPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const requestHeaders = await headers();
   const forwardedProto = requestHeaders.get("x-forwarded-proto") || "https";
   const forwardedHost =
@@ -61,8 +64,8 @@ export default async function SettingsPage({
       <header className="pageHeader">
         <div>
           <p className="eyebrow">SignalCore</p>
-          <h1>Settings</h1>
-          <p className="muted">Account-level integrations, model routing, budgets and output rules.</p>
+          <h1>{tr ? "Ayarlar" : "Settings"}</h1>
+          <p className="muted">{tr ? "Hesap seviyesinde entegrasyonlar, model routing, bütçeler ve output kuralları." : "Account-level integrations, model routing, budgets and output rules."}</p>
         </div>
       </header>
 
@@ -72,8 +75,8 @@ export default async function SettingsPage({
       <section className="panel integrationPanel">
         <div className="panelHeader">
           <div>
-            <h2>Google connection</h2>
-            <p>Connect once, discover every accessible GSC and GA4 property, then bind them to projects.</p>
+            <h2>{tr ? "Google bağlantısı" : "Google connection"}</h2>
+            <p>{tr ? "Bir kez bağlan, erişilebilir tüm GSC ve GA4 propertylerini keşfet ve projelere bağla." : "Connect once, discover every accessible GSC and GA4 property, then bind them to projects."}</p>
           </div>
           <span className={`connectionStatus connection-${connection?.status || "disconnected"}`}>
             {connection?.status || "disconnected"}
@@ -83,7 +86,7 @@ export default async function SettingsPage({
         {connection?.status === "connected" ? (
           <div className="integrationBody">
             <div className="integrationSummary">
-              <div><strong>Google account</strong><span>{connection.external_account || "Connected account"}</span></div>
+              <div><strong>{tr ? "Google hesabı" : "Google account"}</strong><span>{connection.external_account || "Connected account"}</span></div>
               <div><strong>GSC properties</strong><span>{gscResources.length}</span></div>
               <div><strong>GA4 properties</strong><span>{ga4Resources.length}</span></div>
             </div>
@@ -133,7 +136,7 @@ export default async function SettingsPage({
             </div>
 
             <Link className="secondaryButton inlineLink" href="/api/connections/google/connect">
-              Reconnect & refresh Google resources
+              {tr ? "Google kaynaklarını yeniden bağla & yenile" : "Reconnect & refresh Google resources"}
             </Link>
           </div>
         ) : oauthConfigured ? (
@@ -142,7 +145,7 @@ export default async function SettingsPage({
               One Google consent flow will request read-only Search Console and Analytics access.
             </p>
             <Link className="primaryButton inlineLink" href="/api/connections/google/connect">
-              Connect Google
+              {tr ? "Google bağla" : "Connect Google"}
             </Link>
           </div>
         ) : (
