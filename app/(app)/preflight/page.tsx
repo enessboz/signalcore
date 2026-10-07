@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 
 type Check = {
   label: string;
@@ -17,6 +18,8 @@ function checkClass(check: Check) {
 }
 
 export default async function PreflightPage() {
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
   const requestHeaders = await headers();
   const forwardedProto = requestHeaders.get("x-forwarded-proto") || "https";
@@ -204,11 +207,10 @@ export default async function PreflightPage() {
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Deployment verification</p>
+          <p className="eyebrow">{tr ? "Deployment doğrulaması" : "Deployment verification"}</p>
           <h1>Production Preflight</h1>
           <p className="muted">
-            Safe presence/connectivity checks for the final Vercel deployment.
-            Secret values are never rendered.
+            {tr ? "Final production deployment için güvenli connectivity ve presence kontrolleri. Secret değerler hiçbir zaman gösterilmez." : "Safe presence/connectivity checks for the final Vercel deployment. Secret values are never rendered."}
           </p>
         </div>
         <div
@@ -220,8 +222,8 @@ export default async function PreflightPage() {
         >
           <strong>
             {requiredMissing
-              ? requiredMissing + " blocker(s)"
-              : "Preflight ready"}
+              ? requiredMissing + (tr ? " engel" : " blocker(s)")
+              : tr ? "Preflight hazır" : "Preflight ready"}
           </strong>
           <span>{optionalMissing} optional integration(s) unavailable</span>
         </div>
@@ -229,7 +231,7 @@ export default async function PreflightPage() {
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>Required checks</span>
+          <span>{tr ? "Gerekli kontroller" : "Required checks"}</span>
           <strong>
             {allChecks.filter((check) => check.required && check.ready).length}
             {" / "}
@@ -238,7 +240,7 @@ export default async function PreflightPage() {
           <small>Must pass before production activation</small>
         </article>
         <article className="healthCard">
-          <span>Critical schema</span>
+          <span>{tr ? "Kritik schema" : "Critical schema"}</span>
           <strong>
             {schemaChecks.filter((check) => check.ready).length}
             {" / "}
