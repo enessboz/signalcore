@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { acceptHandoff, rejectHandoff } from "./actions";
 
 type AgentDefinitionRow = {
@@ -51,6 +52,8 @@ export default async function TeamPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const [
@@ -193,15 +196,15 @@ export default async function TeamPage({
       <AutoRefresh intervalMs={12000} />
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">AI organization</p>
-          <h1>Team Room</h1>
+          <p className="eyebrow">{tr ? "AI organizasyonu" : "AI organization"}</p>
+          <h1>{tr ? "Ekip Odası" : "Team Room"}</h1>
           <p className="muted">
-            Live hierarchy, runtime state, assigned work, handoffs and scheduled responsibilities.
+            {tr ? "Canlı hiyerarşi, runtime durumu, atanmış işler, handofflar ve zamanlanmış sorumluluklar." : "Live hierarchy, runtime state, assigned work, handoffs and scheduled responsibilities."}
           </p>
         </div>
         <div className="buttonRow">
-          <Link href="/command" className="primaryButton">Talk to Chief Operator</Link>
-          <Link href="/agents" className="secondaryButton">Agent Center</Link>
+          <Link href="/command" className="primaryButton">{tr ? "Chief Operator ile konuş" : "Talk to Chief Operator"}</Link>
+          <Link href="/agents" className="secondaryButton">{tr ? "Agent Merkezi" : "Agent Center"}</Link>
         </div>
       </header>
 
@@ -209,9 +212,9 @@ export default async function TeamPage({
       {query.message ? <p className="formMessage formSuccess pageMessage">{query.message}</p> : null}
 
       <section className="teamLegend">
-        <div><span className="legendDot working" /> Working</div>
-        <div><span className="legendDot idle" /> Idle</div>
-        <div><span className="legendDot attention" /> Needs attention</div>
+        <div><span className="legendDot working" /> {tr ? "Çalışıyor" : "Working"}</div>
+        <div><span className="legendDot idle" /> {tr ? "Boşta" : "Idle"}</div>
+        <div><span className="legendDot attention" /> {tr ? "İlgi gerekiyor" : "Needs attention"}</div>
         <div><strong>{schedules?.length || 0}</strong> scheduled tasks</div>
         <div><strong>{handoffs?.length || 0}</strong> open handoffs</div>
         <div><strong>{workerReady ? "On" : "Waiting"}</strong> background worker</div>
