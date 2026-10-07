@@ -6,7 +6,7 @@ const nav = {
   en: {
     workspace: "Workspace",
     intelligence: "Intelligence",
-    operations: "Operations",
+    operationsGroup: "Operations",
     system: "System",
     overview: "Overview",
     command: "Chief Operator",
@@ -34,7 +34,7 @@ const nav = {
   tr: {
     workspace: "Çalışma Alanı",
     intelligence: "İçgörü",
-    operations: "Operasyon",
+    operationsGroup: "Operasyon",
     system: "Sistem",
     overview: "Genel Bakış",
     command: "Chief Operator",
