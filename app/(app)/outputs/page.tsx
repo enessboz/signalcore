@@ -96,8 +96,26 @@ export default async function OutputsPage({
                 <Link className="secondaryButton" href={`/outputs/${output.id}`}>
                   Open
                 </Link>
-                <a className="ghostButton" href={`/api/outputs/${output.id}/download`}>
-                  Download .md
+                {output.output_type === "presentation" ? (
+                  <a
+                    className="ghostButton"
+                    href={`/api/outputs/${output.id}/download?format=pptx`}
+                  >
+                    Download .pptx
+                  </a>
+                ) : (
+                  <a
+                    className="ghostButton"
+                    href={`/api/outputs/${output.id}/download?format=docx`}
+                  >
+                    Download .docx
+                  </a>
+                )}
+                <a
+                  className="ghostButton"
+                  href={`/api/outputs/${output.id}/download?format=md`}
+                >
+                  .md
                 </a>
               </div>
             </article>

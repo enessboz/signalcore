@@ -17,6 +17,8 @@ create table if not exists public.sales_campaigns (
   min_score integer not null default 65 check (min_score between 0 and 100),
   max_candidates integer not null default 100 check (max_candidates between 1 and 1000),
   max_run_cost_usd numeric(10,4) not null default 0.25 check (max_run_cost_usd >= 0),
+  monthly_budget_usd numeric(10,2) not null default 5.00 check (monthly_budget_usd >= 0),
+  monthly_budget_hard_stop boolean not null default true,
   last_run_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

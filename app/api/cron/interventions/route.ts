@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -21,6 +23,20 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:interventions",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another intervention monitor invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: checks, error } = await supabase
@@ -34,6 +50,13 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "interventions",
+    ownerIds: (checks || []).map((item) => item.owner_id),
+    metadata: { due_checks: checks?.length || 0 },
+  });
 
   const results: Array<Record<string, unknown>> = [];
 
@@ -74,6 +97,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const failedCount = results.filter((item) => item.status === "failed_attempt").length;
+  const waitingCount = results.filter((item) => item.status === "pending").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+      partial: waitingCount,
+    }),
+    metrics: {
+      due_checks: checks?.length || 0,
+      evaluated: results.filter((item) => item.status === "evaluated").length,
+      still_waiting: waitingCount,
+      failed_attempts: failedCount,
+    },
+  });
+
   return NextResponse.json({
     due_checks: checks?.length || 0,
     evaluated: results.filter((item) => item.status === "evaluated").length,
@@ -81,4 +123,9 @@ export async function POST(request: NextRequest) {
     results,
     time: new Date().toISOString(),
   });
+}
+
+// Vercel Cron invokes production cron routes with GET.
+export async function GET(request: NextRequest) {
+  return POST(request);
 }

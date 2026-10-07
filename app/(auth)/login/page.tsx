@@ -1,4 +1,6 @@
 import { login, signup } from "./actions";
+import { getLocale } from "@/lib/i18n";
+import { LanguageToggle } from "@/components/language-toggle";
 
 export default async function LoginPage({
   searchParams,
@@ -6,6 +8,8 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const params = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
 
   return (
     <main className="authPage">
@@ -14,14 +18,21 @@ export default async function LoginPage({
           <span className="brandMark">S</span>
           <div>
             <strong>SignalCore</strong>
-            <small>Evidence → Action</small>
+            <small>{tr ? "Kanıt → Aksiyon" : "Evidence → Action"}</small>
           </div>
         </div>
 
-        <div>
-          <p className="eyebrow">Internal workspace</p>
-          <h1>Sign in</h1>
-          <p className="muted">Access project intelligence, monitoring and sales workflows.</p>
+        <div className="authIntro">
+          <div className="authIntroTop">
+            <p className="eyebrow">{tr ? "İç çalışma alanı" : "Internal workspace"}</p>
+            <LanguageToggle locale={locale} />
+          </div>
+          <h1>{tr ? "SignalCore'a giriş yap" : "Sign in to SignalCore"}</h1>
+          <p className="muted">
+            {tr
+              ? "SEO içgörüleri, otomasyonlar ve proje operasyonlarına güvenli erişim."
+              : "Secure access to SEO intelligence, automations and project operations."}
+          </p>
         </div>
 
         {params.error ? <p className="formMessage formError">{params.error}</p> : null}
@@ -33,12 +44,16 @@ export default async function LoginPage({
             <input name="email" type="email" autoComplete="email" required />
           </label>
           <label>
-            Password
+            {tr ? "Şifre" : "Password"}
             <input name="password" type="password" autoComplete="current-password" minLength={8} required />
           </label>
           <div className="buttonRow">
-            <button className="primaryButton" type="submit">Sign in</button>
-            <button className="secondaryButton" formAction={signup}>Create account</button>
+            <button className="primaryButton" type="submit">
+              {tr ? "Giriş yap" : "Sign in"}
+            </button>
+            <button className="secondaryButton" formAction={signup}>
+              {tr ? "Hesap oluştur" : "Create account"}
+            </button>
           </div>
         </form>
       </section>

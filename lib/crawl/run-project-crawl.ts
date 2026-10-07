@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type CrawlType = "http" | "prospect_audit" | "delta";
 
-type CrawlFinding = {
+export type CrawlFinding = {
   fingerprint: string;
   title: string;
   summary: string;
@@ -19,7 +19,7 @@ type CrawlFinding = {
   metadata: Record<string, unknown>;
 };
 
-type PageGraphState = {
+export type PageGraphState = {
   page: CrawledPage;
   requestedNormalized: string;
   finalNormalized: string;
@@ -29,7 +29,7 @@ type PageGraphState = {
   orphanCandidate: boolean;
 };
 
-function normalizeUrl(raw: string) {
+export function normalizeUrl(raw: string) {
   try {
     const url = new URL(raw);
     url.hash = "";
@@ -53,7 +53,7 @@ function findingKey(value: string) {
   return encodeURIComponent(value).slice(0, 420);
 }
 
-function pageFindings(state: PageGraphState): CrawlFinding[] {
+export function pageFindings(state: PageGraphState): CrawlFinding[] {
   const page = state.page;
   const out: CrawlFinding[] = [];
   const key = findingKey(page.requestedUrl);
@@ -1084,6 +1084,8 @@ async function crawlWithDiscovery(input: {
   origin: string;
   sitemapUrls: string[];
   maxUrls: number;
+  deadlineAt?: number;
+  jsRenderMode?: "off" | "auto" | "always";
 }) {
   const home = new URL("/", input.origin).toString();
   const priorityQueue: string[] = [home];
@@ -1093,8 +1095,14 @@ async function crawlWithDiscovery(input: {
   const queued = new Set<string>([normalizeUrl(home)]);
   const requested = new Set<string>();
   const pages: CrawledPage[] = [];
+  let runtimeLimited = false;
 
   while (pages.length < input.maxUrls) {
+    if (input.deadlineAt && Date.now() >= input.deadlineAt) {
+      runtimeLimited = true;
+      break;
+    }
+
     const batch: string[] = [];
 
     while (batch.length < 5 && pages.length + batch.length < input.maxUrls) {
@@ -1119,8 +1127,15 @@ async function crawlWithDiscovery(input: {
 
     if (!batch.length) break;
 
+    if (input.deadlineAt && Date.now() >= input.deadlineAt) {
+      runtimeLimited = true;
+      break;
+    }
+
     const crawled = await mapLimit(batch, 5, (url) =>
-      crawlPage(url, input.origin),
+      crawlPage(url, input.origin, {
+        jsRenderMode: input.jsRenderMode || "off",
+      }),
     );
     pages.push(...crawled);
 
@@ -1135,7 +1150,7 @@ async function crawlWithDiscovery(input: {
     }
   }
 
-  return pages;
+  return { pages, runtimeLimited };
 }
 
 function buildGraphState(
@@ -1251,11 +1266,22 @@ export async function runProjectCrawl(input: {
   projectId: string;
   maxUrls?: number;
   crawlType?: CrawlType;
+  maxRuntimeMs?: number;
+  sitemapOffset?: number;
+  jsRenderMode?: "off" | "auto" | "always";
   client?: SupabaseClient;
 }) {
   const supabase = input.client || (await createClient());
   const maxUrls = Math.min(Math.max(input.maxUrls || 100, 1), 500);
   const crawlType = input.crawlType || "http";
+  const sitemapOffset = Math.max(Number(input.sitemapOffset || 0), 0);
+  const jsRenderMode = input.jsRenderMode || "off";
+  const startedAtMs = Date.now();
+  const maxRuntimeMs = Math.min(
+    Math.max(input.maxRuntimeMs || 210_000, 30_000),
+    240_000,
+  );
+  const crawlDeadlineAt = startedAtMs + maxRuntimeMs;
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -1283,6 +1309,11 @@ export async function runProjectCrawl(input: {
       status: "running",
       seed_url: seedUrl,
       max_urls: maxUrls,
+      js_render_mode: jsRenderMode,
+      crawl_config: {
+        execution_mode: "inline",
+        js_render_mode: jsRenderMode,
+      },
       started_at: new Date().toISOString(),
     })
     .select("id")
@@ -1296,14 +1327,18 @@ export async function runProjectCrawl(input: {
     const discovery = await discoverSitemapUrls(
       seedUrl,
       Math.min(maxUrls * 3, 1500),
+      { skipUrls: sitemapOffset },
     );
 
-    const pages = await crawlWithDiscovery({
+    const crawlResult = await crawlWithDiscovery({
       seedUrl,
       origin: discovery.origin,
       sitemapUrls: discovery.sitemapUrls,
       maxUrls,
+      deadlineAt: crawlDeadlineAt,
+      jsRenderMode,
     });
+    const pages = crawlResult.pages;
 
     const states = buildGraphState(
       pages,
@@ -1534,8 +1569,20 @@ export async function runProjectCrawl(input: {
     );
 
     const summary = {
-      crawler_version: "raw-http-v2",
+      crawler_version: "raw-http-v3",
+      runtime_budget_ms: maxRuntimeMs,
+      runtime_limited: crawlResult.runtimeLimited,
+      elapsed_ms: Date.now() - startedAtMs,
+      completion_reason: crawlResult.runtimeLimited
+        ? "runtime_budget"
+        : states.length >= maxUrls
+          ? "max_urls"
+          : "discovery_exhausted",
       sitemap_count: discovery.sitemapCount,
+      sitemap_offset: discovery.sitemapOffset,
+      next_sitemap_offset: discovery.nextSitemapOffset,
+      sitemap_scan_exhausted: discovery.scanExhausted,
+      sitemap_valid_urls_seen: discovery.validUrlsSeen,
       sitemap_urls_discovered: discovery.sitemapUrls.length,
       sitemap_urls_not_crawled_in_sample: Math.max(
         discovery.sitemapUrls.length -
@@ -1589,7 +1636,11 @@ export async function runProjectCrawl(input: {
       .from("crawl_runs")
       .update({
         status:
-          errors === states.length && states.length ? "partial" : "succeeded",
+          crawlResult.runtimeLimited ||
+          states.length === 0 ||
+          (errors === states.length && states.length > 0)
+            ? "partial"
+            : "succeeded",
         pages_discovered: states.length,
         pages_crawled: states.length,
         error_count: errors,

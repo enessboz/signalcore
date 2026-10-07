@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { getLocale } from "@/lib/i18n";
 
-export function ProjectDataNav({
+export async function ProjectDataNav({
   projectId,
   active,
 }: {
@@ -11,15 +12,20 @@ export function ProjectDataNav({
     | "ga4"
     | "technical"
     | "rank"
-    | "interventions";
+    | "interventions"
+    | "health";
 }) {
+  const locale = await getLocale();
+  const tr = locale === "tr";
+
   const items = [
-    ["overview", "Project", `/projects/${projectId}`],
+    ["overview", tr ? "Proje" : "Project", `/projects/${projectId}`],
     ["gsc", "Search Console", `/projects/${projectId}/search-console`],
     ["ga4", "GA4 Analytics", `/projects/${projectId}/analytics`],
-    ["technical", "Technical Audit", `/projects/${projectId}/technical`],
+    ["technical", tr ? "Teknik Denetim" : "Technical Audit", `/projects/${projectId}/technical`],
     ["rank", "Rank Tracker", `/projects/${projectId}/rank-tracker`],
-    ["interventions", "Interventions", `/projects/${projectId}/interventions`],
+    ["interventions", tr ? "Intervention'lar" : "Interventions", `/projects/${projectId}/interventions`],
+    ["health", tr ? "Veri Sağlığı" : "Data Health", `/projects/${projectId}/data-health`],
   ] as const;
 
   return (
@@ -28,7 +34,11 @@ export function ProjectDataNav({
         <Link
           key={key}
           href={href}
-          className={active === key ? "projectDataNavItem active" : "projectDataNavItem"}
+          className={
+            active === key
+              ? "projectDataNavItem active"
+              : "projectDataNavItem"
+          }
         >
           {label}
         </Link>

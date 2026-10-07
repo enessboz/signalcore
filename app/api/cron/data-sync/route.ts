@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleGoogleSyncJobs } from "@/lib/runtime/recovery";
 import { enqueueGoogleSync, processGoogleSyncJob } from "@/lib/google/sync";
+import { evaluateGoogleWarehouseHealth } from "@/lib/google/warehouse-health";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,6 +21,7 @@ function nextIsoDay(iso: string) {
 
 // Leave headroom below the 300s function limit so queued work can checkpoint safely.
 const SAFE_RUNTIME_MS = 240_000;
+const MAX_JOB_SLICE_MS = 75_000;
 
 export async function POST(request: NextRequest) {
   const expected = process.env.CRON_SECRET;
@@ -35,6 +40,21 @@ export async function POST(request: NextRequest) {
 
   const startedAt = Date.now();
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:data-sync",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another data sync worker invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleJobs = await recoverStaleGoogleSyncJobs(supabase);
 
   const { data: bindings, error: bindingError } = await supabase
     .from("project_bindings")
@@ -92,7 +112,7 @@ export async function POST(request: NextRequest) {
 
   const { data: jobs, error: queueError } = await supabase
     .from("google_sync_queue")
-    .select("id,project_id,owner_id,source,mode,start_date,end_date,cursor_date,status,priority")
+    .select("id,project_id,owner_id,source,mode,start_date,end_date,cursor_date,status,priority,attempt_count,last_attempt_at")
     .eq("status", "queued")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true })
@@ -102,12 +122,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: queueError.message }, { status: 500 });
   }
 
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "data-sync",
+    ownerIds: [
+      ...(bindings || []).map((item) => item.owner_id),
+      ...(jobs || []).map((item) => item.owner_id),
+    ],
+    metadata: {
+      queued_jobs_selected: jobs?.length || 0,
+      bindings_checked: bindings?.length || 0,
+    },
+  });
+
   const processed: Array<Record<string, unknown>> = [];
 
   for (const job of jobs || []) {
     if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+    const jobStartedAt = Date.now();
 
-    const maxDates = job.source === "gsc" ? 2 : 4;
+    // Backfills are bounded primarily by SAFE_RUNTIME_MS. Higher per-job caps let
+    // Hobby's once-daily cron use the available runtime instead of advancing only
+    // a handful of dates per day; large datasets still checkpoint and stop on time.
+    const maxDates = job.source === "gsc" ? 30 : 60;
     let currentJob = { ...job };
     let datesProcessed = 0;
     let rowsProcessed = 0;
@@ -117,6 +154,7 @@ export async function POST(request: NextRequest) {
 
     for (let step = 0; step < maxDates; step += 1) {
       if (Date.now() - startedAt >= SAFE_RUNTIME_MS) break;
+      if (Date.now() - jobStartedAt >= MAX_JOB_SLICE_MS) break;
 
       try {
         const result = await processGoogleSyncJob(currentJob, supabase);
@@ -131,6 +169,8 @@ export async function POST(request: NextRequest) {
           ...currentJob,
           cursor_date: nextIsoDay(result.date),
           status: "queued",
+          attempt_count: 0,
+          last_attempt_at: new Date().toISOString(),
         };
       } catch (error) {
         failure = error instanceof Error ? error.message : "Sync failed";
@@ -148,15 +188,76 @@ export async function POST(request: NextRequest) {
       rows_processed: rowsProcessed,
       last_date: lastDate,
       error: failure,
+      elapsed_ms: Date.now() - jobStartedAt,
     });
   }
 
+  const healthResults: Array<Record<string, unknown>> = [];
+  const projectOwners = new Map<string, string>();
+
+  for (const binding of bindings || []) {
+    projectOwners.set(binding.project_id, binding.owner_id);
+  }
+  for (const job of jobs || []) {
+    projectOwners.set(job.project_id, job.owner_id);
+  }
+
+  for (const [projectId, ownerId] of projectOwners) {
+    try {
+      const result = await evaluateGoogleWarehouseHealth({
+        client: supabase,
+        projectId,
+        ownerId,
+      });
+      healthResults.push({
+        project_id: projectId,
+        opened: result.opened,
+        resolved: result.resolved,
+      });
+    } catch (error) {
+      healthResults.push({
+        project_id: projectId,
+        error: error instanceof Error ? error.message : "Health evaluation failed",
+      });
+    }
+  }
+
+  const failedCount =
+    enqueueResults.filter((item) => Boolean(item.error)).length +
+    processed.filter((item) => Boolean(item.error)).length +
+    healthResults.filter((item) => Boolean(item.error)).length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(processed.length + enqueueResults.length, 1),
+      failed: failedCount,
+    }),
+    metrics: {
+      recovered_stale_jobs: recoveredStaleJobs,
+      bindings_checked: bindings?.length || 0,
+      enqueue_attempts: enqueueResults.length,
+      jobs_selected: jobs?.length || 0,
+      jobs_processed: processed.length,
+      failed_operations: failedCount,
+      elapsed_ms: Date.now() - startedAt,
+    },
+  });
+
   return NextResponse.json({
+    recovered_stale_jobs: recoveredStaleJobs,
     bindings_checked: bindings?.length || 0,
     enqueue_results: enqueueResults,
     jobs_processed: processed.length,
     processed,
+    health_results: healthResults,
     elapsed_ms: Date.now() - startedAt,
     time: new Date().toISOString(),
   });
+}
+
+// Vercel Cron invokes production cron routes with GET.
+export async function GET(request: NextRequest) {
+  return POST(request);
 }

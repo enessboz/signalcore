@@ -4,13 +4,40 @@ import { notFound } from "next/navigation";
 import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
+import { getLocale } from "@/lib/i18n";
 import {
+  reviewCrawlFinding,
   runTechnicalCrawl,
   saveTechnicalCrawlSchedule,
   setTechnicalCrawlScheduleStatus,
 } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+type CrawlBenchmark = {
+  run_id: string;
+  status: string;
+  execution_mode: string;
+  max_urls: number;
+  pages_discovered: number;
+  pages_crawled: number;
+  error_count: number;
+  duration_ms: number | null;
+  pages_per_minute: number | null;
+  page_rows: number;
+  page_bytes: number;
+  link_rows: number;
+  link_bytes: number;
+  estimated_run_bytes: number;
+  rendered_pages: number;
+  performance_samples: number;
+  finding_count: number;
+  reviewed_findings: number;
+  confirmed_findings: number;
+  false_positive_findings: number;
+  needs_context_findings: number;
+  false_positive_ratio: number | null;
+};
 
 function scalar(value: string | string[] | undefined, fallback = "") {
   return Array.isArray(value) ? value[0] || fallback : value || fallback;
@@ -20,6 +47,25 @@ function yesNo(value: boolean | null | undefined) {
   if (value === true) return "Yes";
   if (value === false) return "No";
   return "—";
+}
+
+function formatBytes(value: number | null | undefined) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  if (bytes < 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function formatDuration(value: number | null | undefined) {
+  const ms = Number(value || 0);
+  if (!ms) return "—";
+  if (ms < 60_000) return (ms / 1000).toFixed(1) + " s";
+  if (ms < 3_600_000) return (ms / 60_000).toFixed(1) + " min";
+  return (ms / 3_600_000).toFixed(2) + " h";
 }
 
 function compactUrl(value: string | null | undefined) {
@@ -41,6 +87,8 @@ export default async function TechnicalAuditPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const { data: project } = await supabase
@@ -54,13 +102,13 @@ export default async function TechnicalAuditPage({
   const [{ data: runs }, { data: crawlSchedules }] = await Promise.all([
     supabase
       .from("crawl_runs")
-    .select("id,crawl_type,status,max_urls,pages_discovered,pages_crawled,error_count,summary,started_at,completed_at,created_at")
+    .select("id,crawl_type,status,max_urls,pages_discovered,pages_crawled,error_count,summary,execution_mode,robots_compliant,js_render_mode,crawl_config,queue_started_at,queue_completed_at,started_at,completed_at,created_at")
     .eq("project_id", id)
       .order("created_at", { ascending: false })
       .limit(10),
     supabase
       .from("technical_crawl_schedules")
-      .select("id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,created_at")
+      .select("id,name,crawl_type,max_urls,schedule_kind,schedule_config,timezone,status,last_run_at,last_status,last_error,failure_count,batch_size,min_delay_ms,respect_robots,js_render_mode,pagespeed_enabled,pagespeed_sample_size,created_at")
       .eq("project_id", id)
       .neq("status", "cancelled")
       .order("created_at", { ascending: false }),
@@ -71,6 +119,10 @@ export default async function TechnicalAuditPage({
     (runs || []).find((run) => run.id === requestedRun) ||
     (runs || [])[0] ||
     null;
+
+  const inventoryPage = Math.max(Number(scalar(query.p, "1")) || 1, 1);
+  const inventoryPageSize = 100;
+  let inventoryTotal = 0;
 
   let pages: Array<{
     id: string;
@@ -103,6 +155,10 @@ export default async function TechnicalAuditPage({
     missing_alt_count: number;
     redirect_chain: unknown;
     fetch_error: string | null;
+    content_simhash: string | null;
+    near_duplicate_group: string | null;
+    rendered: boolean;
+    render_reason: string | null;
   }> = [];
 
   let findings: Array<{
@@ -117,40 +173,114 @@ export default async function TechnicalAuditPage({
 
   let internalLinkCount = 0;
   let externalLinkCount = 0;
+  let robotsAudit: null | {
+    robots_url: string;
+    status_code: number | null;
+    fetch_status: string;
+    crawl_delay_ms: number | null;
+    blocks_all: boolean;
+    sitemap_urls: unknown;
+    error: string | null;
+  } = null;
+  let benchmark: CrawlBenchmark | null = null;
+  const findingReviews = new Map<
+    string,
+    { verdict: string; note: string | null }
+  >();
+
+  let performanceResults: Array<{
+    id: string;
+    url: string;
+    strategy: string;
+    performance_score: number | null;
+    lcp_ms: number | null;
+    cls: number | null;
+    inp_ms: number | null;
+    fcp_ms: number | null;
+    tbt_ms: number | null;
+    fetched_at: string;
+  }> = [];
 
   if (selectedRun) {
-    const [pageResult, findingResult, internalLinks, externalLinks] =
-      await Promise.all([
-        supabase
-          .from("crawl_pages")
-          .select("id,requested_url,url,final_url,status_code,response_ms,title,meta_description,canonical,robots_meta,x_robots_tag,html_lang,hreflangs,h1s,h2s,word_count,internal_link_count,external_link_count,inlink_count,crawl_depth,sitemap_present,orphan_candidate,indexable,indexability_reason,structured_data_count,invalid_structured_data_count,image_count,missing_alt_count,redirect_chain,fetch_error")
-          .eq("crawl_run_id", selectedRun.id)
-          .order("crawl_depth", { ascending: true, nullsFirst: false })
-          .order("url")
-          .limit(500),
-        supabase
-          .from("findings")
-          .select("id,title,importance,summary,affected_scope,recommended_action,metadata")
-          .eq("project_id", id)
-          .eq("metadata->>crawl_run_id", selectedRun.id)
-          .order("importance")
-          .limit(200),
-        supabase
-          .from("crawl_links")
-          .select("id", { count: "exact", head: true })
-          .eq("crawl_run_id", selectedRun.id)
-          .eq("link_scope", "internal"),
-        supabase
-          .from("crawl_links")
-          .select("id", { count: "exact", head: true })
-          .eq("crawl_run_id", selectedRun.id)
-          .eq("link_scope", "external"),
-      ]);
+    const pageFrom = (inventoryPage - 1) * inventoryPageSize;
+    const pageTo = pageFrom + inventoryPageSize - 1;
+
+    const [
+      pageResult,
+      findingResult,
+      internalLinks,
+      externalLinks,
+      robotsResult,
+      performanceResult,
+      benchmarkResult,
+      reviewResult,
+    ] = await Promise.all([
+      supabase
+        .from("crawl_pages")
+        .select("id,requested_url,url,final_url,status_code,response_ms,title,meta_description,canonical,robots_meta,x_robots_tag,html_lang,hreflangs,h1s,h2s,word_count,internal_link_count,external_link_count,inlink_count,crawl_depth,sitemap_present,orphan_candidate,indexable,indexability_reason,structured_data_count,invalid_structured_data_count,image_count,missing_alt_count,redirect_chain,fetch_error,content_simhash,near_duplicate_group,rendered,render_reason", { count: "exact" })
+        .eq("crawl_run_id", selectedRun.id)
+        .order("crawl_depth", { ascending: true, nullsFirst: false })
+        .order("url")
+        .range(pageFrom, pageTo),
+      supabase
+        .from("findings")
+        .select("id,title,importance,summary,affected_scope,recommended_action,metadata")
+        .eq("project_id", id)
+        .eq("metadata->>crawl_run_id", selectedRun.id)
+        .order("importance")
+        .limit(300),
+      supabase
+        .from("crawl_links")
+        .select("id", { count: "exact", head: true })
+        .eq("crawl_run_id", selectedRun.id)
+        .eq("link_scope", "internal"),
+      supabase
+        .from("crawl_links")
+        .select("id", { count: "exact", head: true })
+        .eq("crawl_run_id", selectedRun.id)
+        .eq("link_scope", "external"),
+      supabase
+        .from("crawl_robots_audits")
+        .select("robots_url,status_code,fetch_status,crawl_delay_ms,blocks_all,sitemap_urls,error")
+        .eq("crawl_run_id", selectedRun.id)
+        .maybeSingle(),
+      supabase
+        .from("crawl_performance_results")
+        .select("id,url,strategy,performance_score,lcp_ms,cls,inp_ms,fcp_ms,tbt_ms,fetched_at")
+        .eq("crawl_run_id", selectedRun.id)
+        .order("fetched_at", { ascending: false })
+        .limit(100),
+      supabase.rpc("get_crawl_run_benchmark", {
+        p_run_id: selectedRun.id,
+      }),
+      supabase
+        .from("crawl_finding_reviews")
+        .select("finding_id,verdict,note")
+        .eq("crawl_run_id", selectedRun.id),
+    ]);
 
     pages = (pageResult.data || []) as typeof pages;
+    inventoryTotal = pageResult.count || 0;
     findings = (findingResult.data || []) as typeof findings;
     internalLinkCount = internalLinks.count || 0;
     externalLinkCount = externalLinks.count || 0;
+    robotsAudit = robotsResult.data as null | {
+      robots_url: string;
+      status_code: number | null;
+      fetch_status: string;
+      crawl_delay_ms: number | null;
+      blocks_all: boolean;
+      sitemap_urls: unknown;
+      error: string | null;
+    };
+    performanceResults = (performanceResult.data || []) as typeof performanceResults;
+    benchmark = (benchmarkResult.data || null) as CrawlBenchmark | null;
+    for (const review of reviewResult.data || []) {
+      findingReviews.set(review.finding_id, {
+        verdict: review.verdict,
+        note: review.note,
+      });
+    }
   }
 
   const summary = (selectedRun?.summary || {}) as Record<string, unknown>;
@@ -184,15 +314,16 @@ export default async function TechnicalAuditPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Deterministic technical evidence</p>
-          <h1>{project.name} · Technical Audit</h1>
+          <p className="eyebrow">{tr ? "Deterministik teknik kanıt" : "Deterministic technical evidence"}</p>
+          <h1>{project.name} · {tr ? "Teknik Denetim" : "Technical Audit"}</h1>
           <p className="muted">
-            Raw HTTP crawl, sitemap coverage, internal link graph, crawl depth,
-            indexability and structured technical findings.
+            {tr
+              ? "Raw HTTP crawl, sitemap kapsamı, internal link graph, crawl depth, indexability ve yapılandırılmış teknik bulgular."
+              : "Raw HTTP crawl, sitemap coverage, internal link graph, crawl depth, indexability and structured technical findings."}
           </p>
         </div>
         <Link href={"/projects/" + id} className="ghostButton">
-          Back to project
+          {tr ? "Projeye dön" : "Back to project"}
         </Link>
       </header>
 
@@ -208,32 +339,47 @@ export default async function TechnicalAuditPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Run controlled raw HTTP crawl</h2>
+            <h2>{tr ? "Kontrollü raw HTTP crawl çalıştır" : "Run controlled raw HTTP crawl"}</h2>
             <p>
-              SignalCore follows internal links from the homepage first and uses
-              sitemap URLs for additional coverage. The current synchronous
-              runner is capped at 500 URLs per run.
+              {tr
+                ? "SignalCore önce ana sayfadaki internal link'leri izler, ardından kapsamı sitemap URL'leriyle genişletir. Tüm crawl'lar 25 URL'den 10K production hedefine kadar aynı resumable distributed frontier üzerinde çalışır."
+                : "SignalCore follows internal links from the homepage first and uses sitemap URLs for additional coverage. Every crawl uses the same resumable distributed frontier, from 25 URLs up to the 10K production target."}
             </p>
           </div>
-          <span className="sourceBadge">Raw HTTP V2</span>
+          <span className="sourceBadge">Distributed HTTP V3</span>
         </div>
 
         <form className="crawlRunForm" action={runTechnicalCrawl.bind(null, id)}>
           <label>
-            URL limit
+            {tr ? "URL limiti" : "URL limit"}
             <select name="maxUrls" defaultValue="100">
               <option value="25">25 URLs · quick check</option>
               <option value="50">50 URLs</option>
               <option value="100">100 URLs · recommended</option>
               <option value="200">200 URLs</option>
-              <option value="500">500 URLs · deeper sample</option>
+              <option value="500">500 URLs · production benchmark</option>
+              <option value="1000">1,000 URLs · distributed</option>
+              <option value="5000">5,000 URLs · distributed</option>
+              <option value="10000">10,000 URLs · distributed target</option>
             </select>
           </label>
+          <label>
+            JS rendering
+            <select name="jsRenderMode" defaultValue="auto">
+              <option value="off">Off · raw HTML only</option>
+              <option value="auto">Auto · JS fallback only when needed</option>
+              <option value="always">Always · expensive</option>
+            </select>
+          </label>
+          <label className="checkboxLabel">
+            <input name="pagespeedEnabled" type="checkbox" />
+            {tr ? "Seçili PageSpeed örneğini kuyruğa al" : "Queue selective PageSpeed sample"}
+          </label>
           <button className="primaryButton" type="submit" disabled={!project.domain}>
-            Run Technical Crawl
+            {tr ? "Technical Crawl çalıştır" : "Run Technical Crawl"}
           </button>
           <span className="muted">
-            {project.domain || "Add a project domain before crawling."}
+            {project.domain || (tr ? "Crawl öncesinde proje domain'i ekle." : "Add a project domain before crawling.")}
           </span>
         </form>
       </section>
@@ -241,10 +387,11 @@ export default async function TechnicalAuditPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Background crawl schedules</h2>
+            <h2>{tr ? "Arka plan crawl zamanlamaları" : "Background crawl schedules"}</h2>
             <p>
-              Deterministic crawler schedules continue without the browser and do
-              not require an AI model.
+              {tr
+                ? "Deterministik crawler zamanlamaları tarayıcı kapalıyken de devam eder ve AI modeline ihtiyaç duymaz."
+                : "Deterministic crawler schedules continue without the browser and do not require an AI model."}
             </p>
           </div>
           <span className="sourceBadge">
@@ -259,7 +406,7 @@ export default async function TechnicalAuditPage({
           >
             <div className="formGrid2">
               <label>
-                Schedule name
+                {tr ? "Zamanlama adı" : "Schedule name"}
                 <input
                   name="name"
                   defaultValue="Weekly Full Crawl"
@@ -267,7 +414,7 @@ export default async function TechnicalAuditPage({
                 />
               </label>
               <label>
-                Crawl mode
+                {tr ? "Crawl modu" : "Crawl mode"}
                 <select name="crawlType" defaultValue="http">
                   <option value="http">Full HTTP crawl</option>
                   <option value="delta">Delta monitoring crawl</option>
@@ -280,11 +427,40 @@ export default async function TechnicalAuditPage({
                   <option value="50">50 URLs</option>
                   <option value="100">100 URLs</option>
                   <option value="200">200 URLs</option>
-                  <option value="500">500 URLs</option>
+                  <option value="500">500 URLs · inline</option>
+                  <option value="1000">1,000 URLs · distributed</option>
+                  <option value="5000">5,000 URLs · distributed</option>
+                  <option value="10000">10,000 URLs · distributed</option>
+                  <option value="25000">25,000 URLs · distributed</option>
+                  <option value="50000">50,000 URLs · distributed</option>
                 </select>
               </label>
               <label>
-                Cadence
+                Batch size
+                <input name="batchSize" type="number" min="5" max="100" defaultValue="50" />
+              </label>
+              <label>
+                {tr ? "Minimum request gecikmesi (ms)" : "Minimum request delay (ms)"}
+                <input name="minDelayMs" type="number" min="0" max="10000" step="50" defaultValue="250" />
+              </label>
+              <label>
+                JS rendering
+                <select name="jsRenderMode" defaultValue="auto">
+                  <option value="off">Off</option>
+                  <option value="auto">Auto fallback</option>
+                  <option value="always">Always</option>
+                </select>
+              </label>
+              <label className="checkboxLabel">
+                <input name="pagespeedEnabled" type="checkbox" />
+                {tr ? "Seçili PageSpeed denetimi" : "Selective PageSpeed audit"}
+              </label>
+              <label>
+                {tr ? "PageSpeed örnek boyutu" : "PageSpeed sample size"}
+                <input name="pagespeedSampleSize" type="number" min="0" max="100" defaultValue="20" />
+              </label>
+              <label>
+                {tr ? "Periyot" : "Cadence"}
                 <select name="scheduleKind" defaultValue="weekly">
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -292,11 +468,11 @@ export default async function TechnicalAuditPage({
                 </select>
               </label>
               <label>
-                Local time
+                {tr ? "Yerel saat" : "Local time"}
                 <input name="timeLocal" type="time" defaultValue="10:00" />
               </label>
               <label>
-                Week days
+                {tr ? "Haftanın günleri" : "Week days"}
                 <input
                   name="daysOfWeek"
                   defaultValue="1"
@@ -304,7 +480,7 @@ export default async function TechnicalAuditPage({
                 />
               </label>
               <label>
-                Month day
+                {tr ? "Ayın günü" : "Month day"}
                 <input
                   name="dayOfMonth"
                   type="number"
@@ -322,7 +498,7 @@ export default async function TechnicalAuditPage({
               </label>
             </div>
             <button className="primaryButton" type="submit">
-              Save crawl schedule
+              {tr ? "Crawl zamanlamasını kaydet" : "Save crawl schedule"}
             </button>
           </form>
 
@@ -351,7 +527,10 @@ export default async function TechnicalAuditPage({
                     )}
                   </p>
                   <div className="automationTaskMeta">
-                    <span>{schedule.max_urls} URL limit</span>
+                    <span>{schedule.max_urls.toLocaleString("en-US")} URL limit</span>
+                    <span>{schedule.max_urls > 500 ? "distributed" : "inline"} · batch {schedule.batch_size || 50}</span>
+                    <span>delay ≥ {schedule.min_delay_ms || 0} ms · robots {schedule.respect_robots ? "on" : "off"}</span>
+                    <span>JS {schedule.js_render_mode || "off"} · PSI {schedule.pagespeed_enabled ? schedule.pagespeed_sample_size + " URLs" : "off"}</span>
                     <span>Last: {schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString("en-GB") : "Never"}</span>
                     <span>State: {schedule.last_status}</span>
                     <span>Failures: {schedule.failure_count || 0}</span>
@@ -370,7 +549,7 @@ export default async function TechnicalAuditPage({
                         )}
                       >
                         <button className="secondaryButton" type="submit">
-                          Pause
+                          {tr ? "Duraklat" : "Pause"}
                         </button>
                       </form>
                     ) : (
@@ -383,7 +562,7 @@ export default async function TechnicalAuditPage({
                         )}
                       >
                         <button className="secondaryButton" type="submit">
-                          Activate
+                          {tr ? "Aktive et" : "Activate"}
                         </button>
                       </form>
                     )}
@@ -396,7 +575,7 @@ export default async function TechnicalAuditPage({
                       )}
                     >
                       <button className="ghostButton" type="submit">
-                        Cancel
+                        {tr ? "İptal et" : "Cancel"}
                       </button>
                     </form>
                   </div>
@@ -404,8 +583,8 @@ export default async function TechnicalAuditPage({
               ))
             ) : (
               <div className="emptyState smallEmpty">
-                <strong>No background crawl schedules</strong>
-                <span>Create a daily, weekly or monthly deterministic crawl.</span>
+                <strong>{tr ? "Arka plan crawl zamanlaması yok" : "No background crawl schedules"}</strong>
+                <span>{tr ? "Günlük, haftalık veya aylık deterministik crawl oluştur." : "Create a daily, weekly or monthly deterministic crawl."}</span>
               </div>
             )}
           </div>
@@ -416,14 +595,14 @@ export default async function TechnicalAuditPage({
         <>
           <section className="healthGrid technicalHealthGrid">
             <article className="healthCard">
-              <span>Pages crawled</span>
-              <strong>{selectedRun.pages_crawled}</strong>
+              <span>{tr ? "Taranan sayfalar" : "Pages crawled"}</span>
+              <strong>{selectedRun.pages_crawled.toLocaleString("en-US")}</strong>
               <small>
                 {String(summary.sitemap_urls_discovered || 0)} sitemap URLs discovered
               </small>
             </article>
             <article className="healthCard">
-              <span>Indexable candidates</span>
+              <span>{tr ? "Indexable adaylar" : "Indexable candidates"}</span>
               <strong>{indexablePages}</strong>
               <small>{noindexPages} noindex in sample</small>
             </article>
@@ -433,33 +612,129 @@ export default async function TechnicalAuditPage({
               <small>{externalLinkCount} external links stored</small>
             </article>
             <article className="healthCard">
-              <span>Max crawl depth</span>
+              <span>{tr ? "Maks. crawl depth" : "Max crawl depth"}</span>
               <strong>{String(summary.max_crawl_depth ?? "—")}</strong>
               <small>Shortest internal path from homepage</small>
             </article>
             <article className="healthCard">
-              <span>Orphan candidates</span>
+              <span>{tr ? "Orphan adayları" : "Orphan candidates"}</span>
               <strong>{orphanPages}</strong>
               <small>Sitemap present · no homepage path</small>
             </article>
             <article className="healthCard">
-              <span>Redirected pages</span>
+              <span>{tr ? "Redirect edilen sayfalar" : "Redirected pages"}</span>
               <strong>{redirectPages}</strong>
               <small>{selectedRun.error_count} fetch / HTTP errors</small>
             </article>
             <article className="healthCard">
-              <span>Technical findings</span>
+              <span>{tr ? "Çalışma modu" : "Execution"}</span>
+              <strong>{selectedRun.execution_mode || "inline"}</strong>
+              <small>
+                {selectedRun.execution_mode === "queue"
+                  ? String(summary.frontier_queued || 0) + " queued · " + String(summary.frontier_claimed || 0) + " claimed"
+                  : selectedRun.js_render_mode + " JS mode"}
+              </small>
+            </article>
+            <article className="healthCard">
+              <span>{tr ? "Robots uyumu" : "Robots compliance"}</span>
+              <strong className={robotsAudit?.fetch_status === "failed" ? "healthBad" : "healthGood"}>
+                {robotsAudit?.fetch_status || (selectedRun.robots_compliant ? "enabled" : "off")}
+              </strong>
+              <small>
+                {robotsAudit?.crawl_delay_ms
+                  ? "crawl-delay " + robotsAudit.crawl_delay_ms + " ms"
+                  : "no robots crawl-delay"}
+              </small>
+            </article>
+            <article className="healthCard">
+              <span>{tr ? "Performance örnekleri" : "Performance samples"}</span>
+              <strong>{performanceResults.length}</strong>
+              <small>PageSpeed / CWV results</small>
+            </article>
+            <article className="healthCard">
+              <span>{tr ? "Teknik bulgular" : "Technical findings"}</span>
               <strong>{findings.length}</strong>
               <small>Rule Engine V2</small>
             </article>
             <article className="healthCard">
-              <span>Avg. response</span>
+              <span>{tr ? "Ort. response" : "Avg. response"}</span>
               <strong>
                 {String(summary.avg_response_ms || "—")}
                 {summary.avg_response_ms ? " ms" : ""}
               </strong>
               <small>HTTP sample</small>
             </article>
+          </section>
+
+          <section className="panel">
+            <div className="panelHeader">
+              <div>
+                <h2>{tr ? "Production crawl benchmark" : "Production crawl benchmark"}</h2>
+                <p>
+                  Run-level throughput, storage growth and manually reviewed finding quality.
+                  Use this panel for the required 100 and 500 URL production acceptance tests.
+                </p>
+              </div>
+              <span className="sourceBadge">
+                {benchmark?.execution_mode || selectedRun.execution_mode || "queue"}
+              </span>
+            </div>
+            <div className="foundationGrid">
+              <div>
+                <strong>Duration</strong>
+                <span>{formatDuration(benchmark?.duration_ms)}</span>
+              </div>
+              <div>
+                <strong>Throughput</strong>
+                <span>
+                  {benchmark?.pages_per_minute === null ||
+                  benchmark?.pages_per_minute === undefined
+                    ? "—"
+                    : Number(benchmark.pages_per_minute).toFixed(2) + " pages/min"}
+                </span>
+              </div>
+              <div>
+                <strong>Page storage</strong>
+                <span>
+                  {formatBytes(benchmark?.page_bytes)} ·{" "}
+                  {Number(benchmark?.page_rows || 0).toLocaleString("en-US")} rows
+                </span>
+              </div>
+              <div>
+                <strong>Link storage</strong>
+                <span>
+                  {formatBytes(benchmark?.link_bytes)} ·{" "}
+                  {Number(benchmark?.link_rows || 0).toLocaleString("en-US")} rows
+                </span>
+              </div>
+              <div>
+                <strong>Measured DB payload</strong>
+                <span>{formatBytes(benchmark?.estimated_run_bytes)}</span>
+              </div>
+              <div>
+                <strong>Findings</strong>
+                <span>
+                  {Number(benchmark?.finding_count || 0)} total ·{" "}
+                  {Number(benchmark?.reviewed_findings || 0)} reviewed
+                </span>
+              </div>
+              <div>
+                <strong>False-positive rate</strong>
+                <span>
+                  {benchmark?.false_positive_ratio === null ||
+                  benchmark?.false_positive_ratio === undefined
+                    ? "Review findings to measure"
+                    : Number(benchmark.false_positive_ratio).toFixed(2) + "%"}
+                </span>
+              </div>
+              <div>
+                <strong>Rendered / PSI</strong>
+                <span>
+                  {Number(benchmark?.rendered_pages || 0)} JS ·{" "}
+                  {Number(benchmark?.performance_samples || 0)} PageSpeed samples
+                </span>
+              </div>
+            </div>
           </section>
 
           {selectedRun.crawl_type === "delta" && deltaSummary ? (
@@ -543,6 +818,8 @@ export default async function TechnicalAuditPage({
                     <th>H1</th>
                     <th>Words</th>
                     <th>Schema</th>
+                    <th>Render</th>
+                    <th>Near dup</th>
                     <th>Response</th>
                   </tr>
                 </thead>
@@ -604,6 +881,8 @@ export default async function TechnicalAuditPage({
                             ? " / " + page.invalid_structured_data_count + " invalid"
                             : ""}
                         </td>
+                        <td>{page.rendered ? "JS" : "HTTP"}</td>
+                        <td>{page.near_duplicate_group || "—"}</td>
                         <td>{page.response_ms ? page.response_ms + " ms" : "—"}</td>
                       </tr>
                     );
@@ -611,6 +890,44 @@ export default async function TechnicalAuditPage({
                 </tbody>
               </table>
             </div>
+            {inventoryTotal > inventoryPageSize ? (
+              <div className="buttonRow">
+                {inventoryPage > 1 ? (
+                  <Link
+                    className="ghostButton"
+                    href={
+                      "/projects/" +
+                      id +
+                      "/technical?run=" +
+                      selectedRun.id +
+                      "&p=" +
+                      String(inventoryPage - 1)
+                    }
+                  >
+                    Previous 100
+                  </Link>
+                ) : null}
+                <span className="muted">
+                  Page {inventoryPage} of {Math.ceil(inventoryTotal / inventoryPageSize)} ·{" "}
+                  {inventoryTotal.toLocaleString("en-US")} stored URLs
+                </span>
+                {inventoryPage * inventoryPageSize < inventoryTotal ? (
+                  <Link
+                    className="ghostButton"
+                    href={
+                      "/projects/" +
+                      id +
+                      "/technical?run=" +
+                      selectedRun.id +
+                      "&p=" +
+                      String(inventoryPage + 1)
+                    }
+                  >
+                    Next 100
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <div className="twoCol dataTwoCol">
@@ -627,24 +944,68 @@ export default async function TechnicalAuditPage({
 
               {findings.length ? (
                 <div className="technicalFindingList">
-                  {findings.map((finding) => (
-                    <article className="technicalFindingRow" key={finding.id}>
-                      <div>
-                        <span
-                          className={
-                            "importance importance-" + finding.importance
-                          }
-                        >
-                          {finding.importance}
-                        </span>
-                        <strong>{finding.title}</strong>
-                      </div>
-                      <p>{finding.summary}</p>
-                      {finding.recommended_action ? (
-                        <small>{finding.recommended_action}</small>
-                      ) : null}
-                    </article>
-                  ))}
+                  {findings.map((finding) => {
+                    const review = findingReviews.get(finding.id);
+                    return (
+                      <article className="technicalFindingRow" key={finding.id}>
+                        <div>
+                          <span
+                            className={
+                              "importance importance-" + finding.importance
+                            }
+                          >
+                            {finding.importance}
+                          </span>
+                          <strong>{finding.title}</strong>
+                          {review ? (
+                            <span
+                              className={
+                                review.verdict === "false_positive"
+                                  ? "healthBad"
+                                  : review.verdict === "confirmed"
+                                    ? "healthGood"
+                                    : ""
+                              }
+                            >
+                              {review.verdict.replaceAll("_", " ")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p>{finding.summary}</p>
+                        {finding.recommended_action ? (
+                          <small>{finding.recommended_action}</small>
+                        ) : null}
+                        {review?.note ? <small>Review note: {review.note}</small> : null}
+                        <div className="buttonRow">
+                          {(["confirmed", "false_positive", "needs_context"] as const).map(
+                            (verdict) => (
+                              <form
+                                key={verdict}
+                                action={reviewCrawlFinding.bind(
+                                  null,
+                                  id,
+                                  selectedRun.id,
+                                  finding.id,
+                                  verdict,
+                                )}
+                              >
+                                <button
+                                  className={
+                                    review?.verdict === verdict
+                                      ? "secondaryButton"
+                                      : "ghostButton"
+                                  }
+                                  type="submit"
+                                >
+                                  {verdict.replaceAll("_", " ")}
+                                </button>
+                              </form>
+                            ),
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="emptyState smallEmpty">
@@ -678,9 +1039,37 @@ export default async function TechnicalAuditPage({
                   </div>
                   <div>
                     <strong>Raw crawler</strong>
-                    <span>{String(summary.crawler_version || "raw-http-v2")}</span>
+                    <span>{String(summary.crawler_version || "raw-http-v3")}</span>
                   </div>
                 </div>
+              </section>
+
+              <section className="panel">
+                <div className="panelHeader">
+                  <div>
+                    <h2>PageSpeed / Core Web Vitals</h2>
+                    <p>Selective sample only; crawler coverage does not trigger PSI for every URL.</p>
+                  </div>
+                </div>
+                {performanceResults.length ? (
+                  <div className="savedViewList">
+                    {performanceResults.slice(0, 20).map((result) => (
+                      <div className="savedViewRow" key={result.id}>
+                        <strong>{compactUrl(result.url)}</strong>
+                        <span>
+                          Score {result.performance_score === null ? "—" : Math.round(result.performance_score * 100)}
+                          {" · "}LCP {result.lcp_ms === null ? "—" : Math.round(result.lcp_ms) + " ms"}
+                          {" · "}CLS {result.cls === null ? "—" : Number(result.cls).toFixed(3)}
+                          {" · "}INP {result.inp_ms === null ? "—" : Math.round(result.inp_ms) + " ms"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="emptyState smallEmpty">
+                    <span>No PageSpeed results for this run yet.</span>
+                  </div>
+                )}
               </section>
 
               <section className="panel">

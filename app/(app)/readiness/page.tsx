@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 
 type ReadinessItem = {
   label: string;
@@ -10,10 +11,10 @@ type ReadinessItem = {
   actionLabel?: string;
 };
 
-function statusLabel(item: ReadinessItem) {
-  if (item.ready) return "Ready";
-  if (item.optional) return "Optional";
-  return "Required";
+function statusLabel(item: ReadinessItem, tr: boolean) {
+  if (item.ready) return tr ? "Hazır" : "Ready";
+  if (item.optional) return tr ? "Opsiyonel" : "Optional";
+  return tr ? "Gerekli" : "Required";
 }
 
 function statusClass(item: ReadinessItem) {
@@ -23,6 +24,9 @@ function statusClass(item: ReadinessItem) {
 }
 
 export default async function ReadinessPage() {
+  const locale = await getLocale();
+  const tr = locale === "tr";
+  const t = (en: string, trText: string) => (tr ? trText : en);
   const supabase = await createClient();
 
   const [
@@ -44,6 +48,15 @@ export default async function ReadinessPage() {
     { count: activeOpportunityProjects },
     { count: monitoringInterventions },
     { count: pendingInterventionChecks },
+    { data: projectBindings },
+    { count: queuedSyncJobs },
+    { count: runningSyncJobs },
+    { count: failedSyncJobs },
+    { count: failedSyncDates },
+    { count: recentWorkerRuns },
+    { count: recentWorkerFailures },
+    { count: staleRuntimeRuns },
+    { data: passedUatRuns },
   ] = await Promise.all([
     supabase
       .from("connections")
@@ -116,6 +129,44 @@ export default async function ReadinessPage() {
       .from("seo_intervention_checks")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
+    supabase
+      .from("project_bindings")
+      .select("project_id,binding_type,auto_sync_enabled")
+      .in("binding_type", ["gsc", "ga4"]),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "queued"),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "running"),
+    supabase
+      .from("google_sync_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed"),
+    supabase
+      .from("google_sync_date_log")
+      .select("project_id", { count: "exact", head: true })
+      .eq("status", "failed"),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .gte("started_at", new Date(Date.now() - 24 * 60 * 60_000).toISOString()),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed")
+      .gte("started_at", new Date(Date.now() - 24 * 60 * 60_000).toISOString()),
+    supabase
+      .from("runtime_worker_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "running")
+      .lt("started_at", new Date(Date.now() - 15 * 60_000).toISOString()),
+    supabase
+      .from("agent_uat_runs")
+      .select("scenario_key,expected_agent_key,execution_mode,status")
+      .eq("status", "passed"),
   ]);
 
   const gscCount = (resources || []).filter((item) => item.resource_type === "gsc_property").length;
@@ -132,6 +183,35 @@ export default async function ReadinessPage() {
   const rankWorkerReady = deterministicWorkerReady && dataForSeoReady;
   const opportunityWorkerReady = deterministicWorkerReady;
   const interventionWorkerReady = deterministicWorkerReady;
+  const runtimeHealth = {
+    queuedSyncJobs: queuedSyncJobs || 0,
+    runningSyncJobs: runningSyncJobs || 0,
+    failedSyncJobs: failedSyncJobs || 0,
+    failedSyncDates: failedSyncDates || 0,
+    recentWorkerRuns: recentWorkerRuns || 0,
+    recentWorkerFailures: recentWorkerFailures || 0,
+    staleRuntimeRuns: staleRuntimeRuns || 0,
+  };
+
+  const staleWorkerCount = runtimeHealth.staleRuntimeRuns;
+
+  const boundGoogleProjects = new Set(
+    (projectBindings || []).map((binding) => binding.project_id),
+  ).size;
+  const directUatAgents = new Set(
+    (passedUatRuns || [])
+      .filter((run) => run.execution_mode === "direct")
+      .map((run) => run.expected_agent_key),
+  );
+  const routerUatPasses = (passedUatRuns || []).filter(
+    (run) => run.execution_mode === "router",
+  ).length;
+  const uatSmokeReady = directUatAgents.size >= 7 && routerUatPasses >= 3;
+  const dataHealthReady =
+    runtimeHealth.failedSyncJobs === 0 &&
+    runtimeHealth.failedSyncDates === 0 &&
+    runtimeHealth.staleRuntimeRuns === 0;
+
   const totalScheduled =
     (activeSchedules || 0) +
     (activeTechnicalSchedules || 0) +
@@ -142,9 +222,9 @@ export default async function ReadinessPage() {
 
   const coreItems: ReadinessItem[] = [
     {
-      label: "Supabase application",
+      label: t("Supabase application", "Supabase uygulaması"),
       ready: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY),
-      detail: "Auth, project data, RLS and operational state.",
+      detail: t("Auth, project data, RLS and operational state.", "Auth, proje verisi, RLS ve operasyonel durum."),
     },
     {
       label: "Google OAuth",
@@ -153,36 +233,74 @@ export default async function ReadinessPage() {
         ? `${google.external_account || "Google account"} · ${gscCount} GSC · ${ga4Count} GA4 resources`
         : "Account-level Google connection is not fully ready.",
       actionHref: "/settings",
-      actionLabel: "Google settings",
+      actionLabel: t("Google settings", "Google ayarları"),
     },
     {
-      label: "Credential encryption",
+      label: t("Credential encryption", "Credential şifreleme"),
       ready: encryptionReady,
-      detail: "Required for encrypted Google credential storage.",
+      detail: t("Required for encrypted Google credential storage.", "Şifrelenmiş Google credential saklama için gerekli."),
     },
     {
-      label: "OpenAI agent runtime",
+      label: t("OpenAI agent runtime", "OpenAI agent runtime"),
       ready: openaiReady,
       detail: openaiReady
         ? "Chief Operator, Router and specialist model calls can run."
         : "Add OPENAI_API_KEY to Vercel before agent testing.",
       actionHref: "/agents",
-      actionLabel: "Agent Center",
+      actionLabel: t("Agent Center", "Agent Merkezi"),
     },
     {
-      label: "Background worker",
+      label: t("Background worker", "Arka plan worker'ı"),
       ready: deterministicWorkerReady,
       detail: deterministicWorkerReady
         ? "Deterministic Google sync, technical crawl, Opportunity Engine and intervention monitoring workers can run."
         : "SUPABASE_SECRET_KEY and CRON_SECRET are required. Background workers remain intentionally paused.",
       actionHref: "/automations",
-      actionLabel: "Automations",
+      actionLabel: t("Automations", "Otomasyonlar"),
+    },
+    {
+      label: t("Runtime operations & recovery", "Runtime operasyonları & recovery"),
+      ready:
+        deterministicWorkerReady &&
+        staleWorkerCount === 0 &&
+        runtimeHealth.recentWorkerFailures === 0,
+      detail: deterministicWorkerReady
+        ? `${runtimeHealth.recentWorkerRuns} owner-scoped worker run(s) in 24h · ${runtimeHealth.recentWorkerFailures} failed · ${staleWorkerCount} stale. Interrupted worker records recover automatically.`
+        : "Operations telemetry and stale-run recovery activate with the server worker credential.",
+      actionHref: "/operations",
+      actionLabel: t("Operations", "Operasyonlar"),
+    },
+    {
+      label: t("First-party data health", "First-party veri sağlığı"),
+      ready: boundGoogleProjects === 0 ? google?.status === "connected" : dataHealthReady,
+      detail:
+        boundGoogleProjects === 0
+          ? "No project-level GSC/GA4 bindings are active yet."
+          : `${boundGoogleProjects} project(s) bound · ${runtimeHealth.failedSyncJobs} failed sync job(s) · ${runtimeHealth.failedSyncDates} failed date(s).`,
+      actionHref: "/projects",
+      actionLabel: t("Projects", "Projeler"),
+    },
+    {
+      label: t("Agent UAT smoke gate", "Agent UAT smoke gate"),
+      ready: uatSmokeReady,
+      detail: `${directUatAgents.size}/7 specialist agents have a passing direct scenario · ${routerUatPasses}/3 minimum router scenarios passed.`,
+      actionHref: "/agent-uat",
+      actionLabel: "Agent UAT",
+    },
+    {
+      label: t("Production cost guardrail", "Production maliyet guardrail'i"),
+      ready: Boolean(budgetLimits),
+      detail: budgetLimits
+        ? `${budgetLimits} project/category monthly budget limit(s) configured with deterministic soft/hard budget findings.`
+        : "Configure at least one AI/SERP/browser monthly budget before production model or paid-provider testing.",
+      actionHref: "/costs",
+      actionLabel: t("Costs & Budgets", "Maliyet & Bütçeler"),
     },
   ];
 
   const specialistItems: ReadinessItem[] = [
     {
-      label: "Research / SERP provider",
+      label: t("Research / SERP provider", "Araştırma / SERP provider"),
       ready: dataForSeoReady,
       optional: true,
       detail: dataForSeoReady
@@ -190,7 +308,7 @@ export default async function ReadinessPage() {
         : "Optional: add DataForSEO credentials for live SERP/competitor research.",
     },
     {
-      label: "Developer private GitHub access",
+      label: t("Developer private GitHub access", "Developer private GitHub erişimi"),
       ready: githubPrivateReady,
       optional: true,
       detail: githubPrivateReady
@@ -198,24 +316,24 @@ export default async function ReadinessPage() {
         : "Public repos work without a token; private repos need GITHUB_TOKEN.",
     },
     {
-      label: "Global Brain",
+      label: t("Global Brain", "Global Brain"),
       ready: Boolean(brainEntries),
       detail: `${brainEntries || 0} active organization-wide context entries.`,
       actionHref: "/brain",
-      actionLabel: "Global Brain",
+      actionLabel: t("Global Brain", "Global Brain"),
     },
     {
-      label: "Technical crawl automation",
+      label: t("Technical crawl automation", "Technical crawl otomasyonu"),
       ready: deterministicWorkerReady,
       optional: true,
       detail: deterministicWorkerReady
         ? `${activeTechnicalSchedules || 0} active deterministic crawl schedule(s).`
         : `${activeTechnicalSchedules || 0} schedules configured; activation waits for worker secrets.`,
       actionHref: "/automations",
-      actionLabel: "Automations",
+      actionLabel: t("Automations", "Otomasyonlar"),
     },
     {
-      label: "Sales discovery automation",
+      label: t("Sales discovery automation", "Satış keşif otomasyonu"),
       ready: salesWorkerReady,
       optional: true,
       detail: salesWorkerReady
@@ -225,65 +343,62 @@ export default async function ReadinessPage() {
       actionLabel: "Sales",
     },
     {
-      label: "Rank tracking automation",
+      label: t("Rank tracking automation", "Rank tracking otomasyonu"),
       ready: rankWorkerReady,
       optional: true,
       detail: rankWorkerReady
         ? `${activeRankProjects || 0} project(s) have active Rank Tracking.`
         : `${activeRankProjects || 0} project(s) configured; DataForSEO + worker credentials are required.`,
       actionHref: "/automations",
-      actionLabel: "Automations",
+      actionLabel: t("Automations", "Otomasyonlar"),
     },
     {
-      label: "Automatic Opportunity Engine",
+      label: t("Automatic Opportunity Engine", "Otomatik Opportunity Engine"),
       ready: opportunityWorkerReady,
       optional: true,
       detail: opportunityWorkerReady
         ? `${activeOpportunityProjects || 0} project(s) can scan warehouse evidence automatically.`
         : `${activeOpportunityProjects || 0} project(s) configured; worker credentials are required.`,
       actionHref: "/opportunities",
-      actionLabel: "Intelligence Inbox",
+      actionLabel: t("Intelligence Inbox", "İçgörü Kutusu"),
     },
     {
-      label: "SEO Intervention Monitoring",
+      label: t("SEO Intervention Monitoring", "SEO Intervention Monitoring"),
       ready: interventionWorkerReady,
       optional: true,
       detail: interventionWorkerReady
         ? `${monitoringInterventions || 0} intervention(s) monitoring · ${pendingInterventionChecks || 0} pending checkpoint(s).`
         : `${monitoringInterventions || 0} intervention(s) configured · ${pendingInterventionChecks || 0} pending checkpoint(s); worker credentials are required for automatic evaluation.`,
       actionHref: "/automations",
-      actionLabel: "Automations",
+      actionLabel: t("Automations", "Otomasyonlar"),
     },
     {
-      label: "Cost guardrails",
-      ready: Boolean(budgetLimits),
-      optional: true,
-      detail: budgetLimits
-        ? `${budgetLimits} project/category monthly limits configured.`
-        : "Optional: add AI / SERP / browser monthly hard-stop budgets before stress testing.",
-      actionHref: "/costs",
-      actionLabel: "Costs & Budgets",
+      label: t("Native deliverables", "Native çıktılar"),
+      ready: true,
+      detail: `${outputs || 0} generated output(s) stored. Documents can render as DOCX and presentations as PPTX without another model call.`,
+      actionHref: "/outputs",
+      actionLabel: t("Outputs", "Çıktılar"),
     },
     {
-      label: "Approval gate",
+      label: t("Approval gate", "Onay katmanı"),
       ready: true,
       detail: `${pendingApprovals || 0} pending actions. External-impact proposals require explicit approval.`,
       actionHref: "/approvals",
-      actionLabel: "Approval Center",
+      actionLabel: t("Approval Center", "Onay Merkezi"),
     },
     {
-      label: "Technical evidence layer",
+      label: t("Technical evidence layer", "Teknik kanıt katmanı"),
       ready: true,
       detail: `${crawlRuns || 0} crawl runs stored. Raw HTTP V2 includes internal link graph, depth/inlinks, sitemap/orphan evidence, delta regressions, canonical target checks and hreflang graph validation.`,
       actionHref: "/automations",
-      actionLabel: "Crawler automations",
+      actionLabel: t("Crawler automations", "Crawler otomasyonları"),
     },
     {
-      label: "Persistent outputs",
+      label: t("Persistent outputs", "Kalıcı çıktılar"),
       ready: true,
       detail: `${outputs || 0} generated deliverables stored.`,
       actionHref: "/outputs",
-      actionLabel: "Outputs",
+      actionLabel: t("Outputs", "Çıktılar"),
     },
   ];
 
@@ -294,50 +409,74 @@ export default async function ReadinessPage() {
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Launch checklist</p>
-          <h1>System Readiness</h1>
+          <p className="eyebrow">{t("Launch checklist", "Launch kontrol listesi")}</p>
+          <h1>{t("System Readiness", "Sistem Hazırlığı")}</h1>
           <p className="muted">
-            One place to see what is installed, what is connected and what still blocks full autonomous operation.
+            {t(
+              "See what is connected, healthy and still blocking autonomous operation.",
+              "Hangi katmanların bağlı ve sağlıklı olduğunu, nelerin otonom çalışmayı engellediğini tek yerde gör.",
+            )}
           </p>
         </div>
         <div className={requiredMissing ? "readinessHero readinessHeroWarn" : "readinessHero readinessHeroReady"}>
-          <strong>{requiredMissing ? `${requiredMissing} blockers` : "Core ready"}</strong>
-          <span>{testingAgents} agents installed for testing</span>
+          <strong>
+            {requiredMissing
+              ? requiredMissing + " " + t("blocker(s)", "engel")
+              : t("Core ready", "Core hazır")}
+          </strong>
+          <span>
+            {testingAgents} {t("agents installed for testing", "agent test için kurulu")}
+          </span>
         </div>
       </header>
 
       <section className="healthGrid readinessStats">
         <article className="healthCard">
-          <span>Active projects</span>
+          <span>{t("Active projects", "Aktif projeler")}</span>
           <strong>{projects || 0}</strong>
-          <small>Owned + client + lead</small>
+          <small>{t("Owned + client + lead", "Kendi + müşteri + potansiyel")}</small>
         </article>
         <article className="healthCard">
-          <span>Agent team</span>
+          <span>{t("Agent team", "Agent ekibi")}</span>
           <strong>{testingAgents}</strong>
-          <small>Testing / active</small>
+          <small>{t("Testing / active", "Test / aktif")}</small>
         </article>
         <article className="healthCard">
-          <span>Scheduled work</span>
+          <span>{t("Scheduled work", "Zamanlanmış işler")}</span>
           <strong>{totalScheduled}</strong>
           <small>
             {activeSchedules || 0} agent · {activeTechnicalSchedules || 0} crawl · {activeSalesAutomations || 0} sales · {activeRankProjects || 0} rank · {activeOpportunityProjects || 0} intelligence · {monitoringInterventions || 0} interventions
           </small>
         </article>
         <article className="healthCard">
-          <span>Pending approvals</span>
+          <span>{t("Pending approvals", "Bekleyen onaylar")}</span>
           <strong>{pendingApprovals || 0}</strong>
-          <small>Human gate</small>
+          <small>{t("Human gate", "İnsan onayı")}</small>
         </article>
         <article className="healthCard">
-          <span>Failed jobs</span>
+          <span>{t("Failed jobs", "Hatalı işler")}</span>
           <strong className={failedJobs ? "healthBad" : "healthGood"}>{failedJobs || 0}</strong>
-          <small>Needs review</small>
+          <small>{t("Needs review", "İnceleme gerekiyor")}</small>
         </article>
         <article className="healthCard">
-          <span>Repo bindings</span>
+          <span>{t("Repo bindings", "Repo bağlantıları")}</span>
           <strong>{repositoryBindings || 0}</strong>
-          <small>Developer context</small>
+          <small>{t("Developer context", "Developer context")}</small>
+        </article>
+        <article className="healthCard">
+          <span>{t("Warehouse queue", "Warehouse kuyruğu")}</span>
+          <strong>{runtimeHealth.queuedSyncJobs + runtimeHealth.runningSyncJobs}</strong>
+          <small>{runtimeHealth.queuedSyncJobs} queued · {runtimeHealth.runningSyncJobs} running · {runtimeHealth.failedSyncJobs} failed</small>
+        </article>
+        <article className="healthCard">
+          <span>{t("Worker operations", "Worker operasyonları")}</span>
+          <strong>{runtimeHealth.recentWorkerRuns}</strong>
+          <small>{t("Owner-scoped runs · last 24h", "Owner scoped çalışmalar · son 24 sa")}</small>
+        </article>
+        <article className="healthCard">
+          <span>{t("Stale workers", "Takılı worker'lar")}</span>
+          <strong className={staleWorkerCount ? "healthBad" : "healthGood"}>{staleWorkerCount}</strong>
+          <small>{t("Auto-recovery candidates", "Auto recovery adayları")}</small>
         </article>
       </section>
 
@@ -345,8 +484,8 @@ export default async function ReadinessPage() {
         <section className="panel">
           <div className="panelHeader">
             <div>
-              <h2>Core launch requirements</h2>
-              <p>These determine whether the full runtime can operate.</p>
+              <h2>{t("Core launch requirements", "Core launch gereksinimleri")}</h2>
+              <p>{t("These determine whether the full runtime can operate.", "Tam runtime'ın çalışıp çalışamayacağını bunlar belirler.")}</p>
             </div>
           </div>
           <div className="readinessList">
@@ -358,7 +497,7 @@ export default async function ReadinessPage() {
                   <span>{item.detail}</span>
                 </div>
                 <div className="readinessRowActions">
-                  <span className={`readinessBadge ${statusClass(item)}`}>{statusLabel(item)}</span>
+                  <span className={`readinessBadge ${statusClass(item)}`}>{statusLabel(item, tr)}</span>
                   {item.actionHref ? <Link href={item.actionHref}>{item.actionLabel}</Link> : null}
                 </div>
               </div>
@@ -369,8 +508,8 @@ export default async function ReadinessPage() {
         <section className="panel">
           <div className="panelHeader">
             <div>
-              <h2>Specialist capabilities</h2>
-              <p>Optional providers and evidence layers.</p>
+              <h2>{t("Specialist capabilities", "Uzman yetenekler")}</h2>
+              <p>{t("Optional providers and evidence layers.", "Opsiyonel provider ve kanıt katmanları.")}</p>
             </div>
           </div>
           <div className="readinessList">
@@ -382,7 +521,7 @@ export default async function ReadinessPage() {
                   <span>{item.detail}</span>
                 </div>
                 <div className="readinessRowActions">
-                  <span className={`readinessBadge ${statusClass(item)}`}>{statusLabel(item)}</span>
+                  <span className={`readinessBadge ${statusClass(item)}`}>{statusLabel(item, tr)}</span>
                   {item.actionHref ? <Link href={item.actionHref}>{item.actionLabel}</Link> : null}
                 </div>
               </div>
@@ -393,16 +532,16 @@ export default async function ReadinessPage() {
 
       <section className="panel readinessLaunchPanel">
         <div>
-          <h2>Activation order</h2>
+          <h2>{t("Activation order", "Aktivasyon sırası")}</h2>
           <p>
-            1. Add OPENAI_API_KEY. 2. Add SUPABASE_SECRET_KEY. 3. Verify CRON_SECRET.
-            4. Re-enable the required Supabase Cron workers. 5. Seed Global Brain rules.
-            6. Run controlled project tests before enabling any external-impact executor.
+            {tr
+              ? "1. Production environment değişkenlerini doğrula. 2. Supabase pg_cron worker tetiklemelerini doğrula. 3. Kontrollü bir projede Agent UAT smoke testini çalıştır. 4. En az bir worker döngüsü boyunca Operations ve Data Health temiz kalsın. 5. Supabase leaked-password protection'ı etkinleştir. 6. Son olarak dış etkili executor'ları approval gate arkasında aktive et."
+              : "1. Verify production environment variables. 2. Confirm Supabase pg_cron can invoke protected worker routes. 3. Run Agent UAT on a controlled project. 4. Keep Operations and Data Health clean through a full worker cycle. 5. Enable Supabase leaked-password protection. 6. Only then activate external-impact executors behind the approval gate."}
           </p>
         </div>
         <div className="buttonRow">
-          <Link href="/team" className="secondaryButton">Team Room</Link>
-          <Link href="/command" className="primaryButton">Chief Operator</Link>
+          <Link href="/team" className="secondaryButton">{t("Team Room", "Ekip Odası")}</Link>
+          <Link href="/command" className="primaryButton">{t("Chief Operator", "Chief Operator")}</Link>
         </div>
       </section>
     </div>

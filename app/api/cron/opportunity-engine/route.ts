@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleJobs } from "@/lib/runtime/recovery";
 import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -27,6 +30,21 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:opportunity-engine",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another Opportunity Engine invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleJobs = await recoverStaleJobs(supabase);
 
   const { data: settings, error } = await supabase
     .from("opportunity_scan_settings")
@@ -38,6 +56,13 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "opportunity-engine",
+    ownerIds: (settings || []).map((item) => item.owner_id),
+    metadata: { configured_projects: settings?.length || 0 },
+  });
 
   const targets = (settings || [])
     .filter((item) => due(item.cadence as "daily" | "weekly", item.last_run_at))
@@ -159,11 +184,38 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const failedCount = results.filter((item) => item.status === "failed").length;
+  const partialCount = results.filter((item) => item.status === "partial").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(results.length, 1),
+      failed: failedCount,
+      partial: partialCount,
+    }),
+    metrics: {
+      recovered_stale_jobs: recoveredStaleJobs,
+      configured: settings?.length || 0,
+      due: targets.length,
+      processed: results.length,
+      failed: failedCount,
+      partial: partialCount,
+    },
+  });
+
   return NextResponse.json({
+    recovered_stale_jobs: recoveredStaleJobs,
     configured: settings?.length || 0,
     due: targets.length,
     processed: results.length,
     results,
     time: new Date().toISOString(),
   });
+}
+
+// Vercel Cron invokes production cron routes with GET.
+export async function GET(request: NextRequest) {
+  return POST(request);
 }

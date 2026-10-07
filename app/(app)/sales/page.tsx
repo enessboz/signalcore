@@ -21,6 +21,11 @@ function scalar(value: string | string[] | undefined, fallback = "") {
   return Array.isArray(value) ? value[0] || fallback : value || fallback;
 }
 
+function monthStartIso() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
 function money(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -70,7 +75,7 @@ export default async function SalesPage({
   ] = await Promise.all([
     supabase
       .from("sales_campaigns")
-      .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd,last_run_at,auto_discovery_enabled,schedule_kind,schedule_config,timezone,auto_qualify_count,last_auto_run_at,last_auto_status,last_auto_error,auto_failure_count,created_at")
+      .select("id,name,status,country,industry,location_code,language_code,queries,exclusions,depth,min_score,max_candidates,max_run_cost_usd,monthly_budget_usd,monthly_budget_hard_stop,last_run_at,auto_discovery_enabled,schedule_kind,schedule_config,timezone,auto_qualify_count,last_auto_run_at,last_auto_status,last_auto_error,auto_failure_count,created_at")
       .order("created_at", { ascending: false }),
     supabase
       .from("sales_leads")
@@ -89,8 +94,9 @@ export default async function SalesPage({
     supabase
       .from("sales_discovery_runs")
       .select("id,campaign_id,status,queries_requested,queries_completed,candidates_seen,leads_created,leads_linked,actual_cost,result,error,started_at,completed_at")
+      .gte("started_at", monthStartIso())
       .order("started_at", { ascending: false })
-      .limit(30),
+      .limit(250),
     supabase
       .from("projects")
       .select("id,name,project_type")
@@ -243,6 +249,14 @@ export default async function SalesPage({
                 Max cost / run (USD)
                 <input name="maxRunCost" type="number" min="0" step="0.01" defaultValue="0.25" />
               </label>
+              <label>
+                Monthly SERP budget (USD)
+                <input name="monthlyBudget" type="number" min="0" step="0.01" defaultValue="5" />
+              </label>
+              <label className="checkboxLabel">
+                <input name="monthlyBudgetHardStop" type="checkbox" defaultChecked />
+                Monthly hard stop
+              </label>
             </div>
             <label>
               Discovery queries · one per line
@@ -302,6 +316,18 @@ export default async function SalesPage({
                       <span>Top {campaign.depth}</span>
                       <span>Min score {campaign.min_score}</span>
                       <span>Run cap {money(Number(campaign.max_run_cost_usd || 0))}</span>
+                      <span>
+                        Month{" "}
+                        {money(
+                          campaignRuns.reduce(
+                            (sum, run) => sum + Number(run.actual_cost || 0),
+                            0,
+                          ),
+                        )}
+                        {" / "}
+                        {money(Number(campaign.monthly_budget_usd || 0))}
+                        {campaign.monthly_budget_hard_stop ? " · hard stop" : ""}
+                      </span>
                     </div>
                     <div className="salesQueryPreview">
                       {queries.slice(0, 4).map((item) => (
@@ -423,6 +449,24 @@ export default async function SalesPage({
                             name="timezone"
                             defaultValue={campaign.timezone || "Europe/Istanbul"}
                           />
+                        </label>
+                        <label>
+                          Monthly SERP budget
+                          <input
+                            name="monthlyBudget"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={String(campaign.monthly_budget_usd || 0)}
+                          />
+                        </label>
+                        <label className="checkboxLabel">
+                          <input
+                            name="monthlyBudgetHardStop"
+                            type="checkbox"
+                            defaultChecked={Boolean(campaign.monthly_budget_hard_stop)}
+                          />
+                          Monthly hard stop
                         </label>
                         <button className="ghostButton" type="submit">Save automation</button>
                       </form>

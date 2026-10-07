@@ -95,6 +95,12 @@ create index if not exists seo_intervention_checks_project_idx
   on public.seo_intervention_checks(project_id,status,due_date);
 create index if not exists seo_intervention_checks_project_owner_fk_idx
   on public.seo_intervention_checks(project_id,owner_id);
+create index if not exists seo_int_urls_parent_project_owner_idx
+  on public.seo_intervention_urls(intervention_id,project_id,owner_id);
+create index if not exists seo_int_queries_parent_project_owner_idx
+  on public.seo_intervention_queries(intervention_id,project_id,owner_id);
+create index if not exists seo_int_checks_parent_project_owner_idx
+  on public.seo_intervention_checks(intervention_id,project_id,owner_id);
 
 grant select,insert,update,delete on public.seo_interventions to authenticated;
 grant select,insert,update,delete on public.seo_intervention_urls to authenticated;

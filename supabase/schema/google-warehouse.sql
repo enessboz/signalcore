@@ -35,6 +35,8 @@ create table if not exists public.google_sync_queue (
   status text not null default 'queued'
     check (status in ('queued','running','succeeded','partial','failed','cancelled')),
   priority integer not null default 50,
+  attempt_count integer not null default 0 check (attempt_count between 0 and 20),
+  last_attempt_at timestamptz,
   result jsonb not null default '{}'::jsonb,
   error text,
   created_at timestamptz not null default now(),
@@ -130,6 +132,9 @@ alter table public.project_bindings
   add column if not exists sync_config jsonb not null default '{}'::jsonb;
 
 -- Indexes, grants and RLS policies are applied in production as part of the same rollout.
+
+create index if not exists gsc_query_page_project_owner_fk_idx
+  on public.gsc_query_page_daily(project_id,owner_id);
 
 
 create or replace function public.get_gsc_query_page_insights(

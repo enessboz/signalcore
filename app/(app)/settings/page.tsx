@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function SettingsPage({
@@ -7,6 +8,17 @@ export default async function SettingsPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const query = await searchParams;
+  const requestHeaders = await headers();
+  const forwardedProto = requestHeaders.get("x-forwarded-proto") || "https";
+  const forwardedHost =
+    requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "";
+  const requestOrigin = forwardedHost
+    ? forwardedProto + "://" + forwardedHost
+    : "";
+  const appUrl = (process.env.APP_URL || requestOrigin).replace(/\/$/, "");
+  const googleCallbackUrl = appUrl
+    ? appUrl + "/api/connections/google/callback"
+    : "/api/connections/google/callback";
   const supabase = await createClient();
 
   const { data: connection } = await supabase
@@ -150,7 +162,7 @@ export default async function SettingsPage({
                 <strong>2. Create OAuth Web Client</strong>
                 <span>Application type: Web application</span>
                 <span>Authorized redirect URI:</span>
-                <code>https://signalcore-chi.vercel.app/api/connections/google/callback</code>
+                <code>{googleCallbackUrl}</code>
               </div>
               <div>
                 <strong>3. Add Vercel secrets</strong>
@@ -161,6 +173,22 @@ export default async function SettingsPage({
             </div>
           </div>
         )}
+      </section>
+
+      <section className="panel">
+        <div className="panelHeader">
+          <div>
+            <h2>Production preflight</h2>
+            <p>Validate environment, service-role access and critical schema after the final Vercel connection.</p>
+          </div>
+          <Link className="secondaryButton" href="/preflight">Run preflight</Link>
+        </div>
+        <div className="foundationGrid">
+          <div><strong>Application URL</strong><span>{appUrl || "Resolved from deployment request"}</span></div>
+          <div><strong>OAuth callback</strong><span>{googleCallbackUrl}</span></div>
+          <div><strong>Secrets</strong><span>Presence only; values are never displayed</span></div>
+          <div><strong>Database</strong><span>User RLS + service-role connectivity</span></div>
+        </div>
       </section>
 
       <section className="panel">

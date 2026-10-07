@@ -1,4 +1,5 @@
 import { buildAgentProjectContext, contextToPrompt } from "@/lib/agents/context";
+import { buildTechnicalCrawlAgentContext } from "@/lib/crawl/agent-context";
 import {
   estimateModelCost,
   routeAgentTask,
@@ -343,6 +344,17 @@ export async function executeAgentTask(input: {
 
   const model = configuredModel(target);
   let specialistContext = projectPrompt;
+
+  if (target.agent_key === "technical_seo") {
+    const technicalContext = await buildTechnicalCrawlAgentContext({
+      client: supabase,
+      projectId: input.projectId,
+      ownerId: input.ownerId,
+    });
+    specialistContext +=
+      "\n\nTECHNICAL CRAWL EVIDENCE LAYER:\n" +
+      JSON.stringify(technicalContext, null, 2);
+  }
 
   if (target.agent_key === "developer" && context.repositories.length) {
     const repositoryContext = await fetchGithubRepositoryContext(

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { acquireRuntimeLease } from "@/lib/runtime/lease";
+import { recoverStaleRankRuns } from "@/lib/runtime/recovery";
 import {
   isTrackedKeywordDue,
   runRankTrackingBatch,
   seedTrackedKeywordsFromGsc,
   type TrackedKeywordRow,
 } from "@/lib/seo/rank-tracking";
+import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -41,20 +44,42 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+  const lease = await acquireRuntimeLease({
+    client: supabase,
+    key: "cron:rank-tracker",
+    ttlSeconds: 360,
+  });
+
+  if (!lease.acquired) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Another rank tracker invocation still holds the runtime lease.",
+      time: new Date().toISOString(),
+    });
+  }
+
+  const recoveredStaleRuns = await recoverStaleRankRuns(supabase);
 
   const { data: autoSettings, error: settingsError } = await supabase
     .from("rank_tracking_settings")
     .select("project_id,owner_id,auto_discover_enabled,last_seeded_at,active")
     .eq("active", true)
-    .eq("auto_discover_enabled", true)
     .limit(100);
 
   if (settingsError) {
     return NextResponse.json({ error: settingsError.message }, { status: 500 });
   }
 
+  const runtimeRun = await startRuntimeWorkerRun({
+    client: supabase,
+    workerKey: "rank-tracker",
+    ownerIds: (autoSettings || []).map((item) => item.owner_id),
+    metadata: { auto_projects: autoSettings?.length || 0 },
+  });
+
   const seedResults: Array<Record<string, unknown>> = [];
   for (const settings of autoSettings || []) {
+    if (!settings.auto_discover_enabled) continue;
     if (!olderThan(settings.last_seeded_at, 24 * 3600_000)) continue;
 
     try {
@@ -170,7 +195,34 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const failedRuns =
+    runResults.filter((item) => item.status === "failed").length +
+    seedResults.filter((item) => item.status === "failed").length;
+  const partialRuns = runResults.filter((item) => item.status === "partial").length;
+
+  await finishRuntimeWorkerRun({
+    client: supabase,
+    tracker: runtimeRun,
+    status: summarizeWorkerStatus({
+      processed: Math.max(runResults.length + seedResults.length, 1),
+      failed: failedRuns,
+      partial: partialRuns,
+    }),
+    metrics: {
+      recovered_stale_runs: recoveredStaleRuns,
+      seed_projects: seedResults.length,
+      active_keywords_checked: activeRows?.length || 0,
+      due_keywords: due.length,
+      selected_keywords: selected.length,
+      processed_keywords: processedKeywords,
+      project_runs: runResults.length,
+      failed_runs: failedRuns,
+      partial_runs: partialRuns,
+    },
+  });
+
   return NextResponse.json({
+    recovered_stale_runs: recoveredStaleRuns,
     seed_results: seedResults,
     active_keywords_checked: activeRows?.length || 0,
     due_keywords: due.length,
@@ -179,4 +231,9 @@ export async function POST(request: NextRequest) {
     project_runs: runResults,
     time: new Date().toISOString(),
   });
+}
+
+// Vercel Cron invokes production cron routes with GET.
+export async function GET(request: NextRequest) {
+  return POST(request);
 }

@@ -58,6 +58,104 @@ export async function getBudgetState(input: {
   };
 }
 
+async function syncBudgetFinding(input: {
+  client: SupabaseClient;
+  ownerId: string;
+  projectId: string;
+  category: string;
+  state: Awaited<ReturnType<typeof getBudgetState>>;
+  projectedSpend?: number;
+  blocked?: boolean;
+}) {
+  const fingerprint = "cost:budget:" + input.category;
+  const limit = input.state.monthlyLimit;
+  const spend =
+    input.projectedSpend === undefined
+      ? input.state.spent
+      : input.projectedSpend;
+  const percent =
+    limit !== null && limit > 0 ? (spend / limit) * 100 : 0;
+  const warningThreshold = Number(input.state.softWarningPercent || 80);
+  const shouldWarn =
+    limit !== null &&
+    limit > 0 &&
+    (Boolean(input.blocked) || percent >= warningThreshold);
+
+  if (!shouldWarn) {
+    const { error } = await input.client
+      .from("findings")
+      .update({
+        status: "resolved",
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("project_id", input.projectId)
+      .eq("owner_id", input.ownerId)
+      .eq("fingerprint", fingerprint)
+      .in("status", ["open", "monitoring"]);
+
+    if (error) {
+      throw new Error("Budget finding resolution failed: " + error.message);
+    }
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const blocked = Boolean(input.blocked);
+  const { error } = await input.client.from("findings").upsert(
+    {
+      project_id: input.projectId,
+      owner_id: input.ownerId,
+      finding_type: "observation",
+      title: blocked
+        ? input.category.toUpperCase() + " monthly budget hard-stop reached"
+        : input.category.toUpperCase() + " monthly budget warning",
+      summary:
+        "Recorded/projected " +
+        input.category +
+        " spend is $" +
+        spend.toFixed(4) +
+        " of the $" +
+        Number(limit).toFixed(2) +
+        " monthly limit (" +
+        percent.toFixed(1) +
+        "%).",
+      why_it_matters:
+        "SignalCore uses deterministic budget guardrails so paid providers cannot consume unbounded project budget.",
+      importance: blocked ? "high" : "medium",
+      confidence: "high",
+      status: "open",
+      fingerprint,
+      affected_scope: {
+        category: input.category,
+        monthly_limit: limit,
+        spend,
+        percent,
+      },
+      recommended_action: blocked
+        ? "Review current-month usage before increasing the budget or resuming paid calls."
+        : "Review the remaining monthly budget and expected scheduled work before the hard stop is reached.",
+      metadata: {
+        source: "budget_guard",
+        category: input.category,
+        monthly_limit: limit,
+        current_spend: input.state.spent,
+        projected_spend: spend,
+        soft_warning_percent: warningThreshold,
+        hard_stop: input.state.hardStop,
+        blocked,
+      },
+      last_seen_at: now,
+      updated_at: now,
+    },
+    { onConflict: "project_id,fingerprint" },
+  );
+
+  if (error) {
+    throw new Error("Budget finding upsert failed: " + error.message);
+  }
+}
+
 export async function assertBudgetAvailable(input: {
   ownerId: string;
   projectId: string;
@@ -65,20 +163,32 @@ export async function assertBudgetAvailable(input: {
   estimatedNextCost?: number;
   client?: SupabaseClient;
 }) {
-  const state = await getBudgetState(input);
-
-  if (
+  const supabase = input.client || (await createClient());
+  const state = await getBudgetState({ ...input, client: supabase });
+  const projectedSpend = state.spent + Math.max(Number(input.estimatedNextCost || 0), 0);
+  const blocked =
     state.configured &&
     state.hardStop &&
     state.monthlyLimit !== null &&
-    state.spent + Number(input.estimatedNextCost || 0) >= state.monthlyLimit
-  ) {
+    projectedSpend >= state.monthlyLimit;
+
+  await syncBudgetFinding({
+    client: supabase,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    state,
+    projectedSpend,
+    blocked,
+  });
+
+  if (blocked) {
     throw new Error(
-      `${input.category.toUpperCase()} monthly budget hard-stop reached for this project. Used $${state.spent.toFixed(2)} of $${state.monthlyLimit.toFixed(2)}.`,
+      `${input.category.toUpperCase()} monthly budget hard-stop reached for this project. Used $${state.spent.toFixed(2)} of $${state.monthlyLimit!.toFixed(2)}.`,
     );
   }
 
-  return state;
+  return { ...state, projectedSpend };
 }
 
 export async function logUsage(input: {
@@ -108,4 +218,19 @@ export async function logUsage(input: {
   if (error) {
     throw new Error(`Usage event could not be logged: ${error.message}`);
   }
+
+  const state = await getBudgetState({
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    client: supabase,
+  });
+
+  await syncBudgetFinding({
+    client: supabase,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    category: input.category,
+    state,
+  });
 }
