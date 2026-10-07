@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { setScheduledTaskStatus } from "./actions";
 
@@ -26,6 +27,8 @@ export default async function AutomationsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const [
@@ -154,13 +157,13 @@ export default async function AutomationsPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Operations control</p>
-          <h1>Automations & Data Health</h1>
+          <p className="eyebrow">{tr ? "Operasyon kontrolü" : "Operations control"}</p>
+          <h1>{tr ? "Otomasyonlar & Veri Sağlığı" : "Automations & Data Health"}</h1>
           <p className="muted">
-            Scheduled agent work, conditional chains, Google warehouse sync and execution health.
+            {tr ? "Zamanlanmış agent işleri, conditional chainler, Google warehouse sync ve execution sağlığı." : "Scheduled agent work, conditional chains, Google warehouse sync and execution health."}
           </p>
         </div>
-        <Link href="/command" className="primaryButton">Schedule via Chief Operator</Link>
+        <Link href="/command" className="primaryButton">{tr ? "Chief Operator ile zamanla" : "Schedule via Chief Operator"}</Link>
       </header>
 
       {scalar(query.error) ? <p className="formMessage formError pageMessage">{scalar(query.error)}</p> : null}
@@ -168,7 +171,7 @@ export default async function AutomationsPage({
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>Google connection</span>
+          <span>{tr ? "Google bağlantısı" : "Google connection"}</span>
           <strong className={statusClass(google?.status || "disconnected")}>{google?.status || "disconnected"}</strong>
           <small>{gscCount} GSC · {ga4Count} GA4 resources</small>
         </article>
@@ -178,17 +181,17 @@ export default async function AutomationsPage({
           <small>{gscBindings + ga4Bindings} total project bindings</small>
         </article>
         <article className="healthCard">
-          <span>Scheduled agent work</span>
+          <span>{tr ? "Zamanlanmış agent işleri" : "Scheduled agent work"}</span>
           <strong>{activeScheduled}</strong>
           <small>{agentReady ? "Worker ready" : "Worker paused / credentials missing"}</small>
         </article>
         <article className="healthCard">
-          <span>Google sync queue</span>
+          <span>{tr ? "Google sync kuyruğu" : "Google sync queue"}</span>
           <strong>{queuedSync}</strong>
           <small>{workerReady ? "Worker credentials ready" : "Background sync paused"}</small>
         </article>
         <article className="healthCard">
-          <span>Sales discovery</span>
+          <span>{tr ? "Satış keşfi" : "Sales discovery"}</span>
           <strong>{automatedSalesCampaigns}</strong>
           <small>{salesWorkerReady ? "Worker ready" : "Worker paused / provider missing"}</small>
         </article>
