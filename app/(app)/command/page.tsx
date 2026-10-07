@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import { sendChiefCommand } from "./actions";
 
@@ -15,6 +16,8 @@ export default async function CommandPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const selectedThreadId = scalar(query.thread);
   const supabase = await createClient();
 
@@ -64,15 +67,15 @@ export default async function CommandPage({
     <div className="page commandPage">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Executive control</p>
+          <p className="eyebrow">{tr ? "Yönetici kontrolü" : "Executive control"}</p>
           <h1>Chief Operator</h1>
           <p className="muted">
-            One conversational manager for projects, analytics setup, delegation, reports and scheduled work.
+            {tr ? "Projeler, analytics kurulumu, delegasyon, raporlar ve zamanlanmış işler için tek konuşmalı yönetici." : "One conversational manager for projects, analytics setup, delegation, reports and scheduled work."}
           </p>
         </div>
         <div className="buttonRow">
-          <Link href="/team" className="secondaryButton">Open Team Room</Link>
-          <Link href="/command" className="primaryButton">New command</Link>
+          <Link href="/team" className="secondaryButton">{tr ? "Ekip Odasını aç" : "Open Team Room"}</Link>
+          <Link href="/command" className="primaryButton">{tr ? "Yeni komut" : "New command"}</Link>
         </div>
       </header>
 
@@ -87,7 +90,7 @@ export default async function CommandPage({
         <aside className="commandSidebar">
           <section className="panel commandThreadsPanel">
             <div className="panelHeader">
-              <div><h2>Conversations</h2><p>Recent command threads.</p></div>
+              <div><h2>{tr ? "Konuşmalar" : "Conversations"}</h2><p>{tr ? "Son command threadleri." : "Recent command threads."}</p></div>
             </div>
 
             <div className="commandThreadList">
@@ -110,7 +113,7 @@ export default async function CommandPage({
 
           <section className="panel">
             <div className="panelHeader">
-              <div><h2>Scheduled work</h2><p>{schedules?.length || 0} active or paused tasks.</p></div>
+              <div><h2>{tr ? "Zamanlanmış işler" : "Scheduled work"}</h2><p>{schedules?.length || 0} active or paused tasks.</p></div>
             </div>
             <div className="commandScheduleList">
               {(schedules || []).length ? (
