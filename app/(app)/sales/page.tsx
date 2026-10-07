@@ -1,6 +1,7 @@
 
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
 import {
   auditLead,
@@ -62,6 +63,8 @@ export default async function SalesPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const stageFilter = scalar(query.stage, "all");
   const supabase = await createClient();
 
@@ -147,17 +150,17 @@ export default async function SalesPage({
       <header className="pageHeader">
         <div>
           <p className="eyebrow">Sales OS</p>
-          <h1>Lead Discovery & Pipeline</h1>
+          <h1>{tr ? "Lead Keşfi & Pipeline" : "Lead Discovery & Pipeline"}</h1>
           <p className="muted">
-            Discover prospects cheaply, qualify deterministically, then use agents only on leads worth pursuing.
+            {tr ? "Potansiyel müşterileri düşük maliyetle keşfet, deterministik olarak qualify et ve agentları yalnızca takip etmeye değer leadlerde kullan." : "Discover prospects cheaply, qualify deterministically, then use agents only on leads worth pursuing."}
           </p>
         </div>
         <div className="salesRuntimeBadges">
           <span className={dataForSeoReady ? "healthGood" : "healthWarn"}>
-            SERP {dataForSeoReady ? "ready" : "waiting"}
+            SERP {dataForSeoReady ? (tr ? "hazır" : "ready") : (tr ? "bekliyor" : "waiting")}
           </span>
           <span className={openAiReady ? "healthGood" : "healthWarn"}>
-            Sales Agent {openAiReady ? "ready" : "waiting"}
+            Sales Agent {openAiReady ? (tr ? "hazır" : "ready") : (tr ? "bekliyor" : "waiting")}
           </span>
         </div>
       </header>
@@ -171,32 +174,32 @@ export default async function SalesPage({
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>Total leads</span>
+          <span>{tr ? "Toplam lead" : "Total leads"}</span>
           <strong>{allLeads?.length || 0}</strong>
           <small>Deduplicated by domain</small>
         </article>
         <article className="healthCard">
-          <span>Qualified</span>
+          <span>{tr ? "Qualified" : "Qualified"}</span>
           <strong>{qualified}</strong>
           <small>Score threshold passed</small>
         </article>
         <article className="healthCard">
-          <span>Audited</span>
+          <span>{tr ? "Denetlenen" : "Audited"}</span>
           <strong>{audited}</strong>
           <small>Public prospect audit complete</small>
         </article>
         <article className="healthCard">
-          <span>Active campaigns</span>
+          <span>{tr ? "Aktif kampanyalar" : "Active campaigns"}</span>
           <strong>{activeCampaigns}</strong>
           <small>Draft + active</small>
         </article>
         <article className="healthCard">
-          <span>Meetings / proposals</span>
+          <span>{tr ? "Toplantı / teklif" : "Meetings / proposals"}</span>
           <strong>{(stageCounts.get("meeting") || 0) + (stageCounts.get("proposal") || 0)}</strong>
           <small>High-intent pipeline</small>
         </article>
         <article className="healthCard">
-          <span>Discovery spend</span>
+          <span>{tr ? "Keşif maliyeti" : "Discovery spend"}</span>
           <strong>{money(totalDiscoveryCost)}</strong>
           <small>Last {runs?.length || 0} runs</small>
         </article>
@@ -206,7 +209,7 @@ export default async function SalesPage({
         <section className="panel">
           <div className="panelHeader">
             <div>
-              <h2>Create discovery campaign</h2>
+              <h2>{tr ? "Keşif kampanyası oluştur" : "Create discovery campaign"}</h2>
               <p>Use commercial ICP searches. SignalCore will deduplicate domains before qualification.</p>
             </div>
           </div>
