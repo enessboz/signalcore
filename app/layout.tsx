@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
+import { Manrope } from "next/font/google";
 import "./globals.css";
 import "./design-system.css";
 import { getLocale } from "@/lib/i18n";
+
+const manrope = Manrope({
+  subsets: ["latin", "latin-ext"],
+  variable: "--font-manrope",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -18,7 +25,7 @@ export default async function RootLayout({
   const locale = await getLocale();
   return (
     <html lang={locale}>
-      <body>{children}</body>
+      <body className={manrope.variable}>{children}</body>
     </html>
   );
 }
