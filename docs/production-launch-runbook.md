@@ -37,7 +37,7 @@ Never commit secret values to the repository.
 6. Open `/preflight`.
 7. Do not continue until every required preflight check is green.
 
-SignalCore defines nine protected Vercel Cron routes in `vercel.json`:
+SignalCore exposes nine protected worker routes. Scheduling is handled by Supabase `pg_cron`; `vercel.json` intentionally contains no Vercel Cron jobs:
 
 - `/api/cron/data-sync`
 - `/api/cron/technical-crawler`
@@ -49,7 +49,7 @@ SignalCore defines nine protected Vercel Cron routes in `vercel.json`:
 - `/api/cron/agent-scheduler`
 - `/api/cron/sales-discovery`
 
-Every cron route requires the shared cron authorization secret.
+Every worker route requires the shared cron authorization secret. Supabase Vault stores the scheduler credential and Vercel validates the matching `CRON_SECRET`.
 
 ## 3. Google OAuth
 
