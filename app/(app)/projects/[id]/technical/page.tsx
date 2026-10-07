@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ProjectDataNav } from "@/components/project-data-nav";
 import { createClient } from "@/lib/supabase/server";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
+import { getLocale } from "@/lib/i18n";
 import {
   reviewCrawlFinding,
   runTechnicalCrawl,
@@ -86,6 +87,8 @@ export default async function TechnicalAuditPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const { data: project } = await supabase
@@ -311,15 +314,16 @@ export default async function TechnicalAuditPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Deterministic technical evidence</p>
-          <h1>{project.name} · Technical Audit</h1>
+          <p className="eyebrow">{tr ? "Deterministik teknik kanıt" : "Deterministic technical evidence"}</p>
+          <h1>{project.name} · {tr ? "Teknik Denetim" : "Technical Audit"}</h1>
           <p className="muted">
-            Raw HTTP crawl, sitemap coverage, internal link graph, crawl depth,
-            indexability and structured technical findings.
+            {tr
+              ? "Raw HTTP crawl, sitemap kapsamı, internal link graph, crawl depth, indexability ve yapılandırılmış teknik bulgular."
+              : "Raw HTTP crawl, sitemap coverage, internal link graph, crawl depth, indexability and structured technical findings."}
           </p>
         </div>
         <Link href={"/projects/" + id} className="ghostButton">
-          Back to project
+          {tr ? "Projeye dön" : "Back to project"}
         </Link>
       </header>
 
@@ -335,11 +339,11 @@ export default async function TechnicalAuditPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Run controlled raw HTTP crawl</h2>
+            <h2>{tr ? "Kontrollü raw HTTP crawl çalıştır" : "Run controlled raw HTTP crawl"}</h2>
             <p>
-              SignalCore follows internal links from the homepage first and uses
-              sitemap URLs for additional coverage. Every new crawl uses the same
-              resumable distributed frontier, from 25 URLs up to the 10K production target.
+              {tr
+                ? "SignalCore önce ana sayfadaki internal link'leri izler, ardından kapsamı sitemap URL'leriyle genişletir. Tüm crawl'lar 25 URL'den 10K production hedefine kadar aynı resumable distributed frontier üzerinde çalışır."
+                : "SignalCore follows internal links from the homepage first and uses sitemap URLs for additional coverage. Every crawl uses the same resumable distributed frontier, from 25 URLs up to the 10K production target."}
             </p>
           </div>
           <span className="sourceBadge">Distributed HTTP V3</span>
@@ -347,7 +351,7 @@ export default async function TechnicalAuditPage({
 
         <form className="crawlRunForm" action={runTechnicalCrawl.bind(null, id)}>
           <label>
-            URL limit
+            {tr ? "URL limiti" : "URL limit"}
             <select name="maxUrls" defaultValue="100">
               <option value="25">25 URLs · quick check</option>
               <option value="50">50 URLs</option>
@@ -369,13 +373,13 @@ export default async function TechnicalAuditPage({
           </label>
           <label className="checkboxLabel">
             <input name="pagespeedEnabled" type="checkbox" />
-            Queue selective PageSpeed sample
+            {tr ? "Seçili PageSpeed örneğini kuyruğa al" : "Queue selective PageSpeed sample"}
           </label>
           <button className="primaryButton" type="submit" disabled={!project.domain}>
-            Run Technical Crawl
+            {tr ? "Technical Crawl çalıştır" : "Run Technical Crawl"}
           </button>
           <span className="muted">
-            {project.domain || "Add a project domain before crawling."}
+            {project.domain || (tr ? "Crawl öncesinde proje domain'i ekle." : "Add a project domain before crawling.")}
           </span>
         </form>
       </section>
@@ -383,10 +387,11 @@ export default async function TechnicalAuditPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Background crawl schedules</h2>
+            <h2>{tr ? "Arka plan crawl zamanlamaları" : "Background crawl schedules"}</h2>
             <p>
-              Deterministic crawler schedules continue without the browser and do
-              not require an AI model.
+              {tr
+                ? "Deterministik crawler zamanlamaları tarayıcı kapalıyken de devam eder ve AI modeline ihtiyaç duymaz."
+                : "Deterministic crawler schedules continue without the browser and do not require an AI model."}
             </p>
           </div>
           <span className="sourceBadge">
@@ -401,7 +406,7 @@ export default async function TechnicalAuditPage({
           >
             <div className="formGrid2">
               <label>
-                Schedule name
+                {tr ? "Zamanlama adı" : "Schedule name"}
                 <input
                   name="name"
                   defaultValue="Weekly Full Crawl"
@@ -409,7 +414,7 @@ export default async function TechnicalAuditPage({
                 />
               </label>
               <label>
-                Crawl mode
+                {tr ? "Crawl modu" : "Crawl mode"}
                 <select name="crawlType" defaultValue="http">
                   <option value="http">Full HTTP crawl</option>
                   <option value="delta">Delta monitoring crawl</option>
@@ -435,7 +440,7 @@ export default async function TechnicalAuditPage({
                 <input name="batchSize" type="number" min="5" max="100" defaultValue="50" />
               </label>
               <label>
-                Minimum request delay (ms)
+                {tr ? "Minimum request gecikmesi (ms)" : "Minimum request delay (ms)"}
                 <input name="minDelayMs" type="number" min="0" max="10000" step="50" defaultValue="250" />
               </label>
               <label>
@@ -448,14 +453,14 @@ export default async function TechnicalAuditPage({
               </label>
               <label className="checkboxLabel">
                 <input name="pagespeedEnabled" type="checkbox" />
-                Selective PageSpeed audit
+                {tr ? "Seçili PageSpeed denetimi" : "Selective PageSpeed audit"}
               </label>
               <label>
-                PageSpeed sample size
+                {tr ? "PageSpeed örnek boyutu" : "PageSpeed sample size"}
                 <input name="pagespeedSampleSize" type="number" min="0" max="100" defaultValue="20" />
               </label>
               <label>
-                Cadence
+                {tr ? "Periyot" : "Cadence"}
                 <select name="scheduleKind" defaultValue="weekly">
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -463,11 +468,11 @@ export default async function TechnicalAuditPage({
                 </select>
               </label>
               <label>
-                Local time
+                {tr ? "Yerel saat" : "Local time"}
                 <input name="timeLocal" type="time" defaultValue="10:00" />
               </label>
               <label>
-                Week days
+                {tr ? "Haftanın günleri" : "Week days"}
                 <input
                   name="daysOfWeek"
                   defaultValue="1"
@@ -475,7 +480,7 @@ export default async function TechnicalAuditPage({
                 />
               </label>
               <label>
-                Month day
+                {tr ? "Ayın günü" : "Month day"}
                 <input
                   name="dayOfMonth"
                   type="number"
@@ -493,7 +498,7 @@ export default async function TechnicalAuditPage({
               </label>
             </div>
             <button className="primaryButton" type="submit">
-              Save crawl schedule
+              {tr ? "Crawl zamanlamasını kaydet" : "Save crawl schedule"}
             </button>
           </form>
 
@@ -544,7 +549,7 @@ export default async function TechnicalAuditPage({
                         )}
                       >
                         <button className="secondaryButton" type="submit">
-                          Pause
+                          {tr ? "Duraklat" : "Pause"}
                         </button>
                       </form>
                     ) : (
@@ -557,7 +562,7 @@ export default async function TechnicalAuditPage({
                         )}
                       >
                         <button className="secondaryButton" type="submit">
-                          Activate
+                          {tr ? "Aktive et" : "Activate"}
                         </button>
                       </form>
                     )}
@@ -570,7 +575,7 @@ export default async function TechnicalAuditPage({
                       )}
                     >
                       <button className="ghostButton" type="submit">
-                        Cancel
+                        {tr ? "İptal et" : "Cancel"}
                       </button>
                     </form>
                   </div>
@@ -578,8 +583,8 @@ export default async function TechnicalAuditPage({
               ))
             ) : (
               <div className="emptyState smallEmpty">
-                <strong>No background crawl schedules</strong>
-                <span>Create a daily, weekly or monthly deterministic crawl.</span>
+                <strong>{tr ? "Arka plan crawl zamanlaması yok" : "No background crawl schedules"}</strong>
+                <span>{tr ? "Günlük, haftalık veya aylık deterministik crawl oluştur." : "Create a daily, weekly or monthly deterministic crawl."}</span>
               </div>
             )}
           </div>
@@ -590,14 +595,14 @@ export default async function TechnicalAuditPage({
         <>
           <section className="healthGrid technicalHealthGrid">
             <article className="healthCard">
-              <span>Pages crawled</span>
+              <span>{tr ? "Taranan sayfalar" : "Pages crawled"}</span>
               <strong>{selectedRun.pages_crawled.toLocaleString("en-US")}</strong>
               <small>
                 {String(summary.sitemap_urls_discovered || 0)} sitemap URLs discovered
               </small>
             </article>
             <article className="healthCard">
-              <span>Indexable candidates</span>
+              <span>{tr ? "Indexable adaylar" : "Indexable candidates"}</span>
               <strong>{indexablePages}</strong>
               <small>{noindexPages} noindex in sample</small>
             </article>
@@ -607,22 +612,22 @@ export default async function TechnicalAuditPage({
               <small>{externalLinkCount} external links stored</small>
             </article>
             <article className="healthCard">
-              <span>Max crawl depth</span>
+              <span>{tr ? "Maks. crawl depth" : "Max crawl depth"}</span>
               <strong>{String(summary.max_crawl_depth ?? "—")}</strong>
               <small>Shortest internal path from homepage</small>
             </article>
             <article className="healthCard">
-              <span>Orphan candidates</span>
+              <span>{tr ? "Orphan adayları" : "Orphan candidates"}</span>
               <strong>{orphanPages}</strong>
               <small>Sitemap present · no homepage path</small>
             </article>
             <article className="healthCard">
-              <span>Redirected pages</span>
+              <span>{tr ? "Redirect edilen sayfalar" : "Redirected pages"}</span>
               <strong>{redirectPages}</strong>
               <small>{selectedRun.error_count} fetch / HTTP errors</small>
             </article>
             <article className="healthCard">
-              <span>Execution</span>
+              <span>{tr ? "Çalışma modu" : "Execution"}</span>
               <strong>{selectedRun.execution_mode || "inline"}</strong>
               <small>
                 {selectedRun.execution_mode === "queue"
@@ -631,7 +636,7 @@ export default async function TechnicalAuditPage({
               </small>
             </article>
             <article className="healthCard">
-              <span>Robots compliance</span>
+              <span>{tr ? "Robots uyumu" : "Robots compliance"}</span>
               <strong className={robotsAudit?.fetch_status === "failed" ? "healthBad" : "healthGood"}>
                 {robotsAudit?.fetch_status || (selectedRun.robots_compliant ? "enabled" : "off")}
               </strong>
@@ -642,17 +647,17 @@ export default async function TechnicalAuditPage({
               </small>
             </article>
             <article className="healthCard">
-              <span>Performance samples</span>
+              <span>{tr ? "Performance örnekleri" : "Performance samples"}</span>
               <strong>{performanceResults.length}</strong>
               <small>PageSpeed / CWV results</small>
             </article>
             <article className="healthCard">
-              <span>Technical findings</span>
+              <span>{tr ? "Teknik bulgular" : "Technical findings"}</span>
               <strong>{findings.length}</strong>
               <small>Rule Engine V2</small>
             </article>
             <article className="healthCard">
-              <span>Avg. response</span>
+              <span>{tr ? "Ort. response" : "Avg. response"}</span>
               <strong>
                 {String(summary.avg_response_ms || "—")}
                 {summary.avg_response_ms ? " ms" : ""}
@@ -664,7 +669,7 @@ export default async function TechnicalAuditPage({
           <section className="panel">
             <div className="panelHeader">
               <div>
-                <h2>Production crawl benchmark</h2>
+                <h2>{tr ? "Production crawl benchmark" : "Production crawl benchmark"}</h2>
                 <p>
                   Run-level throughput, storage growth and manually reviewed finding quality.
                   Use this panel for the required 100 and 500 URL production acceptance tests.
