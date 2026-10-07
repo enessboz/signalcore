@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AGENT_UAT_SCENARIOS } from "@/lib/agents/uat-scenarios";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { runAgentUatAction } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -39,6 +40,8 @@ export default async function AgentUatPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const { data: projects } = await supabase
@@ -126,15 +129,13 @@ export default async function AgentUatPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Controlled production validation</p>
+          <p className="eyebrow">{tr ? "Kontrollü production doğrulaması" : "Controlled production validation"}</p>
           <h1>Agent UAT</h1>
           <p className="muted">
-            42 controlled scenarios validate routing, evidence discipline, approval
-            gates and handoff behavior. Runs are intentionally one-at-a-time to
-            protect model budget.
+            {tr ? "42 kontrollü senaryo routing, kanıt disiplini, approval gate ve handoff davranışını doğrular. Model bütçesini korumak için testler tek tek çalıştırılır." : "42 controlled scenarios validate routing, evidence discipline, approval gates and handoff behavior. Runs are intentionally one-at-a-time to protect model budget."}
           </p>
         </div>
-        <Link href="/agents" className="secondaryButton">Agent Center</Link>
+        <Link href="/agents" className="secondaryButton">{tr ? "Agent Merkezi" : "Agent Center"}</Link>
       </header>
 
       {scalar(query.error) ? (
@@ -147,7 +148,7 @@ export default async function AgentUatPage({
       <section className="panel">
         <form method="get" className="budgetForm">
           <label>
-            Test project
+            {tr ? "Test projesi" : "Test project"}
             <select name="project" defaultValue={selectedProject}>
               {(projects || []).map((project) => (
                 <option value={project.id} key={project.id}>
@@ -159,29 +160,29 @@ export default async function AgentUatPage({
           <label>
             Agent
             <select name="agent" defaultValue={selectedAgent}>
-              <option value="all">All agents</option>
+              <option value="all">{tr ? "Tüm agentlar" : "All agents"}</option>
               {agentKeys.map((key) => (
                 <option value={key} key={key}>{agentLabel(key)}</option>
               ))}
             </select>
           </label>
-          <button className="secondaryButton" type="submit">Apply</button>
+          <button className="secondaryButton" type="submit">{tr ? "Uygula" : "Apply"}</button>
         </form>
       </section>
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>Scenario catalog</span>
+          <span>{tr ? "Senaryo kataloğu" : "Scenario catalog"}</span>
           <strong>{AGENT_UAT_SCENARIOS.length}</strong>
           <small>35 direct · 7 router</small>
         </article>
         <article className="healthCard">
-          <span>Completed</span>
+          <span>{tr ? "Tamamlanan" : "Completed"}</span>
           <strong>{completed.length}</strong>
           <small>{passed} passed · {failed} failed</small>
         </article>
         <article className="healthCard">
-          <span>Average score</span>
+          <span>{tr ? "Ortalama skor" : "Average score"}</span>
           <strong>{averageScore === null ? "—" : averageScore + "/100"}</strong>
           <small>Selected project history</small>
         </article>
@@ -191,7 +192,7 @@ export default async function AgentUatPage({
           <small>Visible project UAT history</small>
         </article>
         <article className="healthCard">
-          <span>Runs left today</span>
+          <span>{tr ? "Bugün kalan test" : "Runs left today"}</span>
           <strong className={dailyRemaining ? "healthGood" : "healthBad"}>
             {dailyRemaining}
           </strong>
@@ -200,7 +201,7 @@ export default async function AgentUatPage({
         <article className="healthCard">
           <span>Model runtime</span>
           <strong className={apiConfigured ? "healthGood" : "healthBad"}>
-            {apiConfigured ? "Ready" : "Waiting"}
+            {apiConfigured ? (tr ? "Hazır" : "Ready") : (tr ? "Bekliyor" : "Waiting")}
           </strong>
           <small>OPENAI_API_KEY</small>
         </article>
