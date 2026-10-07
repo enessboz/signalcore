@@ -34,7 +34,7 @@ const groups: Array<{ label: string; items: Item[] }> = [
     ],
   },
   {
-    label: "operations",
+    label: "operationsGroup",
     items: [
       { key: "outputs", href: "/outputs", icon: "file" },
       { key: "approvals", href: "/approvals", icon: "shield" },
