@@ -1,17 +1,31 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 
-const WORKER_LABELS: Record<string, string> = {
-  "data-sync": "Google Data Sync",
-  "technical-crawler": "Technical Crawl Scheduler",
-  "crawl-worker": "Distributed Crawl Worker",
-  "crawl-performance": "PageSpeed / CWV Worker",
-  "rank-tracker": "Rank Tracker",
-  "opportunity-engine": "Opportunity Engine",
-  interventions: "Intervention Monitoring",
-  "agent-scheduler": "Agent Scheduler",
-  "sales-discovery": "Sales Discovery",
-};
+const WORKER_LABELS = {
+  en: {
+    "data-sync": "Google Data Sync",
+    "technical-crawler": "Technical Crawl Orchestrator",
+    "crawl-worker": "Distributed Crawl Worker",
+    "crawl-performance": "PageSpeed / CWV Worker",
+    "rank-tracker": "Rank Tracker",
+    "opportunity-engine": "Opportunity Engine",
+    interventions: "Intervention Monitoring",
+    "agent-scheduler": "Agent Scheduler",
+    "sales-discovery": "Sales Discovery",
+  },
+  tr: {
+    "data-sync": "Google Veri Senkronizasyonu",
+    "technical-crawler": "Technical Crawl Orchestrator",
+    "crawl-worker": "Distributed Crawl Worker",
+    "crawl-performance": "PageSpeed / CWV Worker",
+    "rank-tracker": "Rank Takibi",
+    "opportunity-engine": "Fırsat Motoru",
+    interventions: "Intervention İzleme",
+    "agent-scheduler": "Agent Zamanlayıcı",
+    "sales-discovery": "Satış Keşfi",
+  },
+} as const;
 
 function duration(value: number | null | undefined) {
   if (value === null || value === undefined) return "—";
@@ -53,6 +67,9 @@ function compactMetrics(value: unknown) {
 }
 
 export default async function OperationsPage() {
+  const locale = await getLocale();
+  const tr = locale === "tr";
+  const labels = WORKER_LABELS[locale];
   const supabase = await createClient();
   const dayAgo = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
   const staleCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
@@ -143,59 +160,62 @@ export default async function OperationsPage() {
     }
   }
 
-  const workers = Object.keys(WORKER_LABELS);
+  const workers = Object.keys(labels);
 
   return (
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Production operations</p>
-          <h1>Operations</h1>
+          <p className="eyebrow">{tr ? "Production operasyonları" : "Production operations"}</p>
+          <h1>{tr ? "Operasyonlar" : "Operations"}</h1>
           <p className="muted">
-            Owner-scoped worker history, queue state, failures and runtime duration.
-            This is the operational layer for scheduled SignalCore work.
+            {tr
+              ? "Worker geçmişini, queue durumunu, hataları ve çalışma sürelerini tek bir operasyon ekranından izle."
+              : "Monitor worker history, queue state, failures and runtime duration from one operational view."}
           </p>
         </div>
-        <Link href="/readiness" className="secondaryButton">System Readiness</Link>
+        <Link href="/readiness" className="secondaryButton">
+          {tr ? "Sistem Hazırlığı" : "System Readiness"}
+        </Link>
       </header>
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>24h successful</span>
+          <span>{tr ? "24 sa başarılı" : "24h successful"}</span>
           <strong className="healthGood">{recentSucceeded}</strong>
-          <small>Completed worker runs</small>
+          <small>{tr ? "Tamamlanan worker çalışmaları" : "Completed worker runs"}</small>
         </article>
         <article className="healthCard">
-          <span>24h partial</span>
+          <span>{tr ? "24 sa kısmi" : "24h partial"}</span>
           <strong>{recentPartial}</strong>
-          <small>Completed with warnings</small>
+          <small>{tr ? "Uyarılarla tamamlandı" : "Completed with warnings"}</small>
         </article>
         <article className="healthCard">
-          <span>24h failed</span>
+          <span>{tr ? "24 sa hatalı" : "24h failed"}</span>
           <strong className={recentFailed ? "healthBad" : "healthGood"}>{recentFailed}</strong>
-          <small>Needs investigation</small>
+          <small>{tr ? "İnceleme gerekiyor" : "Needs investigation"}</small>
         </article>
         <article className="healthCard">
-          <span>Stale worker runs</span>
+          <span>{tr ? "Takılı kalan worker'lar" : "Stale worker runs"}</span>
           <strong className={staleRuns.length ? "healthBad" : "healthGood"}>
             {staleRuns.length}
           </strong>
-          <small>Running longer than 15 min</small>
+          <small>{tr ? "15 dakikadan uzun süredir çalışıyor" : "Running longer than 15 min"}</small>
         </article>
         <article className="healthCard">
-          <span>Average duration</span>
+          <span>{tr ? "Ortalama süre" : "Average duration"}</span>
           <strong>{duration(averageDuration)}</strong>
-          <small>Last 24 hours</small>
+          <small>{tr ? "Son 24 saat" : "Last 24 hours"}</small>
         </article>
         <article className="healthCard">
-          <span>Google sync queue</span>
+          <span>{tr ? "Google sync kuyruğu" : "Google sync queue"}</span>
           <strong>{(queuedSync || 0) + (runningSync || 0)}</strong>
           <small>
             {queuedSync || 0} queued · {runningSync || 0} running · {failedSync || 0} failed
           </small>
         </article>
         <article className="healthCard">
-          <span>Distributed crawl queue</span>
+          <span>{tr ? "Distributed crawl kuyruğu" : "Distributed crawl queue"}</span>
           <strong>
             {(queuedCrawlUrls || 0) + (claimedCrawlUrls || 0)}
           </strong>
@@ -205,12 +225,12 @@ export default async function OperationsPage() {
           </small>
         </article>
         <article className="healthCard">
-          <span>PageSpeed queue</span>
+          <span>{tr ? "PageSpeed kuyruğu" : "PageSpeed queue"}</span>
           <strong>{queuedPerformance || 0}</strong>
-          <small>Selective CWV samples waiting</small>
+          <small>{tr ? "Bekleyen seçili CWV örnekleri" : "Selective CWV samples waiting"}</small>
         </article>
         <article className="healthCard">
-          <span>Generic jobs</span>
+          <span>{tr ? "Genel işler" : "Generic jobs"}</span>
           <strong className={failedJobs ? "healthBad" : ""}>{failedJobs || 0}</strong>
           <small>{runningJobs || 0} running · {failedJobs || 0} failed</small>
         </article>
@@ -219,8 +239,8 @@ export default async function OperationsPage() {
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Worker health</h2>
-            <p>Latest owner-visible run for every production worker.</p>
+            <h2>{tr ? "Worker sağlığı" : "Worker health"}</h2>
+            <p>{tr ? "Her production worker için son çalışma durumu." : "Latest owner-visible run for every production worker."}</p>
           </div>
         </div>
         <div className="readinessList">
@@ -229,13 +249,13 @@ export default async function OperationsPage() {
             return (
               <div className="readinessRow" key={workerKey}>
                 <div className="readinessCopy">
-                  <strong>{WORKER_LABELS[workerKey]}</strong>
+                  <strong>{labels[workerKey as keyof typeof labels]}</strong>
                   <span>
                     {latest
-                      ? new Date(latest.started_at).toLocaleString("en-GB") +
+                      ? new Date(latest.started_at).toLocaleString(tr ? "tr-TR" : "en-GB") +
                         " · " +
                         compactMetrics(latest.metrics)
-                      : "No production run recorded yet"}
+                      : tr ? "Henüz production çalışması yok" : "No production run recorded yet"}
                   </span>
                 </div>
                 <div className="readinessRowActions">
@@ -253,8 +273,8 @@ export default async function OperationsPage() {
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Recent worker runs</h2>
-            <p>Latest 150 owner-scoped operations.</p>
+            <h2>{tr ? "Son worker çalışmaları" : "Recent worker runs"}</h2>
+            <p>{tr ? "Son 150 operasyon kaydı." : "Latest 150 owner-scoped operations."}</p>
           </div>
         </div>
 
@@ -263,19 +283,19 @@ export default async function OperationsPage() {
             <table className="dataTable">
               <thead>
                 <tr>
-                  <th>Started</th>
-                  <th>Worker</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>Metrics</th>
-                  <th>Error</th>
+                  <th>{tr ? "Başlangıç" : "Started"}</th>
+                  <th>{tr ? "Worker" : "Worker"}</th>
+                  <th>{tr ? "Durum" : "Status"}</th>
+                  <th>{tr ? "Süre" : "Duration"}</th>
+                  <th>{tr ? "Metrikler" : "Metrics"}</th>
+                  <th>{tr ? "Hata" : "Error"}</th>
                 </tr>
               </thead>
               <tbody>
                 {(runs || []).map((run) => (
                   <tr key={run.id}>
-                    <td>{new Date(run.started_at).toLocaleString("en-GB")}</td>
-                    <td>{WORKER_LABELS[run.worker_key] || run.worker_key}</td>
+                    <td>{new Date(run.started_at).toLocaleString(tr ? "tr-TR" : "en-GB")}</td>
+                    <td>{labels[run.worker_key as keyof typeof labels] || run.worker_key}</td>
                     <td>
                       <span className={statusClass(run.status)}>{run.status}</span>
                     </td>
@@ -291,8 +311,8 @@ export default async function OperationsPage() {
           </div>
         ) : (
           <div className="emptyState smallEmpty">
-            <strong>No runtime worker history yet</strong>
-            <span>The first records will appear after the new cron runtime is deployed.</span>
+            <strong>{tr ? "Henüz runtime worker geçmişi yok" : "No runtime worker history yet"}</strong>
+            <span>{tr ? "İlk kayıtlar scheduler çalışmaya başladığında burada görünecek." : "The first records will appear after the new cron runtime is deployed."}</span>
           </div>
         )}
       </section>
