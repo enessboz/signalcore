@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import {
   assignProjectOutputProfile,
   createOutputProfile,
@@ -17,6 +18,8 @@ export default async function OutputProfilesPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const [
@@ -46,10 +49,10 @@ export default async function OutputProfilesPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Strict output governance</p>
-          <h1>Output Profiles</h1>
+          <p className="eyebrow">{tr ? "Sıkı çıktı yönetişimi" : "Strict output governance"}</p>
+          <h1>{tr ? "Çıktı Profilleri" : "Output Profiles"}</h1>
           <p className="muted">
-            Define the only rules and presentation/document structures Reporting Agent is allowed to use.
+            {tr ? "Reporting Agentın kullanmasına izin verilen sunum/doküman yapılarını ve kuralları tanımla." : "Define the only rules and presentation/document structures Reporting Agent is allowed to use."}
           </p>
         </div>
       </header>
@@ -61,19 +64,19 @@ export default async function OutputProfilesPage({
         <section className="panel">
           <div className="panelHeader">
             <div>
-              <h2>Create profile</h2>
+              <h2>{tr ? "Profil oluştur" : "Create profile"}</h2>
               <p>Rules use JSON so the renderer and Reporting Agent can consume the same contract.</p>
             </div>
           </div>
           <form className="formPanel" action={createOutputProfile}>
             <label>
-              Output type
+              {tr ? "Çıktı türü" : "Output type"}
               <select name="outputType" defaultValue="presentation">
                 {types.map((type) => <option key={type} value={type}>{type}</option>)}
               </select>
             </label>
-            <label>Name<input name="name" required placeholder="Impavo SEO Sales Presentation v1" /></label>
-            <label>Description<input name="description" placeholder="What this profile is for" /></label>
+            <label>{tr ? "Ad" : "Name"}<input name="name" required placeholder="Impavo SEO Sales Presentation v1" /></label>
+            <label>{tr ? "Açıklama" : "Description"}<input name="description" placeholder="What this profile is for" /></label>
             <label>
               Rules JSON
               <textarea
@@ -88,7 +91,7 @@ export default async function OutputProfilesPage({
             </label>
             <label className="checkboxLabel">
               <input type="checkbox" name="strictMode" defaultChecked />
-              Strict mode
+              {tr ? "Sıkı mod" : "Strict mode"}
             </label>
             <label className="checkboxLabel">
               <input type="checkbox" name="isDefault" />
