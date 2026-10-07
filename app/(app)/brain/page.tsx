@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { addGlobalBrainEntry, toggleGlobalBrainEntry } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -12,6 +13,8 @@ export default async function BrainPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
   const { data: entries } = await supabase
     .from("global_brain_entries")
@@ -23,10 +26,10 @@ export default async function BrainPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Organization memory</p>
+          <p className="eyebrow">{tr ? "Organizasyon hafızası" : "Organization memory"}</p>
           <h1>Global Brain</h1>
           <p className="muted">
-            Company-wide rules and context shared by Chief Operator and every specialist agent.
+            {tr ? "Chief Operator ve tüm uzman agentların kullandığı şirket çapındaki kurallar ve context." : "Company-wide rules and context shared by Chief Operator and every specialist agent."}
           </p>
         </div>
       </header>
@@ -37,11 +40,11 @@ export default async function BrainPage({
       <div className="twoCol">
         <section className="panel">
           <div className="panelHeader">
-            <div><h2>Add Global Brain entry</h2><p>Use high priority for non-negotiable rules.</p></div>
+            <div><h2>{tr ? "Global Brain kaydı ekle" : "Add Global Brain entry"}</h2><p>{tr ? "Değiştirilemez kurallar için yüksek priority kullan." : "Use high priority for non-negotiable rules."}</p></div>
           </div>
           <form className="formPanel" action={addGlobalBrainEntry}>
             <label>
-              Category
+              {tr ? "Kategori" : "Category"}
               <select name="category" defaultValue="rule">
                 <option value="company">Company</option>
                 <option value="seo_methodology">SEO methodology</option>
@@ -53,16 +56,16 @@ export default async function BrainPage({
                 <option value="rule">Rule</option>
               </select>
             </label>
-            <label>Title<input name="title" required placeholder="e.g. Presentation rules" /></label>
+            <label>{tr ? "Başlık" : "Title"}<input name="title" required placeholder="e.g. Presentation rules" /></label>
             <label>Priority<input name="priority" type="number" min="0" max="100" defaultValue="80" /></label>
-            <label>Content<textarea name="content" rows={10} required placeholder="Add the rule, methodology or company context agents must follow." /></label>
-            <button className="primaryButton" type="submit">Add to Global Brain</button>
+            <label>{tr ? "İçerik" : "Content"}<textarea name="content" rows={10} required placeholder="Add the rule, methodology or company context agents must follow." /></label>
+            <button className="primaryButton" type="submit">{tr ? "Global Brain’e ekle" : "Add to Global Brain"}</button>
           </form>
         </section>
 
         <section className="panel">
           <div className="panelHeader">
-            <div><h2>Shared rules</h2><p>{entries?.filter((entry) => entry.active).length || 0} active entries.</p></div>
+            <div><h2>{tr ? "Paylaşılan kurallar" : "Shared rules"}</h2><p>{entries?.filter((entry) => entry.active).length || 0} active entries.</p></div>
           </div>
           {(entries || []).length ? (
             <div className="brainEntryList">
