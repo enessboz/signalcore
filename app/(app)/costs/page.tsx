@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/lib/i18n";
 import { removeBudgetLimit, saveBudgetLimit } from "./actions";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -27,6 +28,8 @@ export default async function CostsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
+  const locale = await getLocale();
+  const tr = locale === "tr";
   const supabase = await createClient();
 
   const [
@@ -77,10 +80,10 @@ export default async function CostsPage({
     <div className="page">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Cost control</p>
-          <h1>Costs & Budgets</h1>
+          <p className="eyebrow">{tr ? "Maliyet kontrolü" : "Cost control"}</p>
+          <h1>{tr ? "Maliyet & Bütçeler" : "Costs & Budgets"}</h1>
           <p className="muted">
-            Project-level guardrails for model usage, paid SERP data and browser/render costs.
+            {tr ? "Model kullanımı, ücretli SERP verisi ve browser/render maliyetleri için proje seviyesinde guardrailler." : "Project-level guardrails for model usage, paid SERP data and browser/render costs."}
           </p>
         </div>
       </header>
@@ -90,7 +93,7 @@ export default async function CostsPage({
 
       <section className="healthGrid">
         <article className="healthCard">
-          <span>This month</span>
+          <span>{tr ? "Bu ay" : "This month"}</span>
           <strong>{money(totalSpend)}</strong>
           <small>Recorded SignalCore usage</small>
         </article>
@@ -105,7 +108,7 @@ export default async function CostsPage({
           <small>Provider-reported costs</small>
         </article>
         <article className="healthCard">
-          <span>Configured limits</span>
+          <span>{tr ? "Tanımlı limitler" : "Configured limits"}</span>
           <strong>{configuredBudgets}</strong>
           <small>Project + category budgets</small>
         </article>
@@ -115,7 +118,7 @@ export default async function CostsPage({
           <small>Block before paid call</small>
         </article>
         <article className="healthCard">
-          <span>Projects tracked</span>
+          <span>{tr ? "Takip edilen projeler" : "Projects tracked"}</span>
           <strong>{projects?.length || 0}</strong>
           <small>Active workspaces</small>
         </article>
@@ -124,7 +127,7 @@ export default async function CostsPage({
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Set budget guardrail</h2>
+            <h2>{tr ? "Bütçe guardrail tanımla" : "Set budget guardrail"}</h2>
             <p>
               No limit means no budget hard-stop. A configured hard-stop blocks the next paid call before it begins.
             </p>
