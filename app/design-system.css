@@ -1144,3 +1144,380 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .commandOverlay { padding-top: 78px; }
   .commandPalette { border-radius: 13px; }
 }
+
+/* SignalCore Typography v3 */
+:root {
+  --font-ui: var(--font-manrope), "Inter", "SF Pro Text", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pageHeader h1 {
+  font-size: clamp(32px, 2.45vw, 42px);
+  line-height: 1.08;
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.eyebrow {
+  font-size: 10px;
+  line-height: 1.3;
+  font-weight: 800;
+  letter-spacing: .09em;
+}
+
+.muted {
+  font-size: 13px;
+  line-height: 1.62;
+}
+
+.panelHeader h2 {
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 720;
+}
+
+.panelHeader p,
+.panelHeader a {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.navItem {
+  min-height: 39px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.navGroupLabel {
+  font-size: 9px;
+}
+
+.brandCopy strong,
+.brand strong {
+  font-size: 15px;
+}
+
+.brandCopy small,
+.brand small {
+  font-size: 10px;
+}
+
+.sidebarStatus strong { font-size: 10px; }
+.sidebarStatus small { font-size: 9px; }
+
+.globalSearch { font-size: 12px; }
+.globalSearch kbd { font-size: 10px; }
+.topbarBreadcrumb,
+.topbarBreadcrumb strong { font-size: 12px; }
+.topbarEnv { font-size: 11px; }
+
+.primaryButton,
+.secondaryButton,
+.ghostButton {
+  min-height: 38px;
+  padding-inline: 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ghostButton {
+  min-height: 33px;
+  font-size: 11px;
+}
+
+.statCard span { font-size: 11px; }
+.statCard strong { font-size: 30px; }
+.statCard small { font-size: 10px; line-height: 1.4; }
+
+.healthCard span { font-size: 10px; }
+.healthCard strong { font-size: 22px; }
+.healthCard small { font-size: 10px; line-height: 1.5; }
+
+.projectRow strong { font-size: 12px; }
+.projectRow span,
+.projectRow small { font-size: 10px; }
+
+.dataTable th {
+  font-size: 10px;
+  height: 38px;
+}
+.dataTable td {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.formPanel label,
+.inlineForm label,
+.bindingCard label,
+.explorerForm label,
+.funnelToolbarRow label,
+.funnelStepCard label,
+.filterForm label,
+.crawlRunForm label {
+  font-size: 11px;
+}
+
+.formPanel input,
+.formPanel textarea,
+.formPanel select,
+.inlineForm select,
+.bindingCard select,
+.explorerForm input,
+.explorerForm select,
+.funnelToolbarRow input,
+.funnelToolbarRow select,
+.funnelStepCard input,
+.filterForm select,
+.crawlRunForm select,
+.crawlRunForm input {
+  font-size: 12px;
+}
+
+.badge,
+.importance,
+.confidence,
+.sourceBadge,
+.connectionStatus,
+.readinessBadge {
+  font-size: 10px;
+}
+
+.foundationGrid strong { font-size: 11px; }
+.foundationGrid span { font-size: 10px; line-height: 1.5; }
+
+.emptyState strong { font-size: 13px; }
+.emptyState span { font-size: 11px; }
+
+.projectDataNavItem,
+.modeTab {
+  font-size: 11px;
+}
+
+.readinessHero strong { font-size: 13px; }
+.readinessHero span { font-size: 10px; }
+.readinessIcon { font-size: 10px; }
+.readinessCopy strong { font-size: 11px; }
+.readinessCopy span { font-size: 10px; line-height: 1.5; }
+.readinessRowActions a { font-size: 10px; }
+
+.opportunityHeader h2 { font-size: 15px; }
+.opportunityHeader p:not(.eyebrow) { font-size: 11px; }
+
+.dashboardHero .muted { font-size: 13px; }
+.intelligenceEmpty strong { font-size: 13px; }
+.intelligenceEmpty p { font-size: 11px; }
+
+.pulseItem strong { font-size: 11px; }
+.pulseItem span { font-size: 10px; }
+.pulseState { font-size: 9px !important; }
+
+/* Team Room readability */
+.teamPage .pageHeader {
+  margin-bottom: 24px;
+}
+
+.teamLegend {
+  gap: 16px;
+  padding: 11px 14px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.teamLegend strong {
+  font-size: 11px;
+}
+
+.orgChart {
+  padding: 28px 20px 32px;
+}
+
+.orgLevel {
+  width: min(590px, 100%);
+}
+
+.orgSpecialistWrap {
+  min-width: 1080px;
+  padding-top: 28px;
+}
+
+.orgSpecialistGrid {
+  grid-template-columns: repeat(4, minmax(250px, 1fr));
+  gap: 14px;
+}
+
+.orgSpecialistNode {
+  padding-top: 18px;
+}
+
+.orgNodeStem {
+  height: 18px;
+}
+
+.teamAgentCard {
+  padding: 16px;
+  border-radius: 13px;
+}
+
+.teamAgentCard.featured {
+  padding: 17px;
+}
+
+.teamAgentHeader {
+  gap: 12px;
+}
+
+.teamAgentIdentity {
+  gap: 10px;
+}
+
+.teamAgentAvatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.teamAgentIdentity h3 {
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.teamAgentStates {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.teamRuntime {
+  padding: 5px 7px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.teamAgentDescription {
+  min-height: 58px;
+  margin: 13px 0 12px;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.teamAgentTask {
+  padding: 11px 12px;
+  gap: 4px;
+  border-radius: 9px;
+}
+
+.teamAgentTask span,
+.teamAgentTask small {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.teamAgentTask strong {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.teamAgentFooter {
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.teamAgentFooter > div {
+  gap: 3px;
+}
+
+.teamAgentFooter span {
+  font-size: 9px;
+}
+
+.teamAgentFooter strong {
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.teamCapabilityLine {
+  gap: 5px;
+  margin-top: 11px;
+}
+
+.teamCapabilityLine span {
+  padding: 4px 7px;
+  font-size: 8.5px;
+  line-height: 1.2;
+}
+
+.teamActivityRow {
+  grid-template-columns: 36px minmax(0,1fr) auto;
+  gap: 11px;
+  padding: 12px 0;
+}
+
+.activityAgentBadge {
+  width: 34px;
+  height: 34px;
+  font-size: 9px;
+}
+
+.teamActivityCopy strong { font-size: 11px; }
+.teamActivityCopy span { font-size: 10px; }
+.teamActivityMeta small { font-size: 9px; }
+
+.teamHandoffRow {
+  padding: 12px 0;
+  gap: 5px;
+}
+.teamHandoffRow strong { font-size: 11px; }
+.teamHandoffRow p { font-size: 10px; line-height: 1.55; }
+.teamHandoffRow span { font-size: 9px; }
+
+.teamExecutiveRow {
+  padding: 11px 0;
+}
+.teamExecutiveRow strong { font-size: 11px; }
+.teamExecutiveRow span,
+.teamExecutiveRow small { font-size: 9px; }
+
+/* Chief Operator / command readability */
+.commandChatHeader strong { font-size: 12px; }
+.commandChatHeader span { font-size: 10px; }
+.commandMessage p { font-size: 12px; line-height: 1.65; }
+.commandMessageMeta { font-size: 9px; }
+.commandWelcome h2 { font-size: 22px; }
+.commandWelcome > p { font-size: 12px; }
+.quickPromptCard { font-size: 11px; }
+.commandComposerFoot span { font-size: 10px; }
+
+@media (max-width: 980px) {
+  body { font-size: 13px; }
+  .pageHeader h1 { font-size: 32px; }
+  .teamAgentDescription { min-height: auto; }
+}
+
+@media (max-width: 640px) {
+  .pageHeader h1 { font-size: 30px; }
+  .muted { font-size: 12px; }
+  .primaryButton,
+  .secondaryButton,
+  .ghostButton { font-size: 11px; }
+}
