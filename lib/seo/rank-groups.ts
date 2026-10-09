@@ -447,6 +447,107 @@ export async function syncGscRankGroups(input: {
   };
 }
 
+async function settleWaitingRankGroupPlans(input: {
+  client: SupabaseClient;
+  projectId: string;
+  ownerId: string;
+}) {
+  const { data: waitingSteps, error } = await input.client
+    .from("command_plan_steps")
+    .select("id,plan_id,arguments,result")
+    .eq("owner_id", input.ownerId)
+    .eq("action_type", "create_rank_groups_from_gsc")
+    .eq("status", "waiting_data")
+    .order("updated_at", { ascending: true })
+    .limit(50);
+
+  if (error) return;
+
+  for (const step of waitingSteps || []) {
+    const result =
+      step.result && typeof step.result === "object"
+        ? (step.result as Record<string, unknown>)
+        : {};
+    if (String(result.projectId || "") !== input.projectId) continue;
+
+    const args =
+      step.arguments && typeof step.arguments === "object"
+        ? (step.arguments as Record<string, unknown>)
+        : {};
+    const days = Math.min(
+      Math.max(Number(args.performance_window_days || 28), 1),
+      480,
+    );
+    const rawMetrics = Array.isArray(args.rank_group_metrics)
+      ? args.rank_group_metrics.map(String)
+      : ["clicks", "impressions"];
+    const metrics = rawMetrics.filter(
+      (metric): metric is GscRankGroupMetric =>
+        metric === "clicks" || metric === "impressions",
+    );
+    const expected = (metrics.length ? metrics : ["clicks", "impressions"]).map(
+      (metric) => groupDefinition(metric as GscRankGroupMetric, days).key,
+    );
+
+    const { data: groups } = await input.client
+      .from("rank_keyword_groups")
+      .select("id,group_key,name,last_status,last_data_date,last_refreshed_at")
+      .eq("project_id", input.projectId)
+      .eq("owner_id", input.ownerId)
+      .in("group_key", expected);
+
+    const ready =
+      (groups || []).length === expected.length &&
+      (groups || []).every(
+        (group) => group.last_status === "succeeded" && group.last_refreshed_at,
+      );
+    if (!ready) continue;
+
+    const now = new Date().toISOString();
+    await input.client
+      .from("command_plan_steps")
+      .update({
+        status: "completed",
+        result: {
+          ...result,
+          auto_resumed: true,
+          completed_from_background_data: true,
+          groups: groups || [],
+        },
+        blocker_type: null,
+        blocker_message: null,
+        required_input: {},
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", step.id)
+      .eq("owner_id", input.ownerId);
+
+    const { count: remaining } = await input.client
+      .from("command_plan_steps")
+      .select("id", { count: "exact", head: true })
+      .eq("plan_id", step.plan_id)
+      .in("status", [
+        "pending",
+        "running",
+        "waiting_data",
+        "waiting_user",
+        "blocked_tool",
+      ]);
+
+    await input.client
+      .from("command_plans")
+      .update({
+        status: remaining ? "planned" : "completed",
+        last_error: null,
+        completed_at: remaining ? null : now,
+        updated_at: now,
+      })
+      .eq("id", step.plan_id)
+      .eq("owner_id", input.ownerId);
+  }
+}
+
 export async function refreshDueGscRankGroups(input: {
   client: SupabaseClient;
   maxGroups?: number;
@@ -463,6 +564,7 @@ export async function refreshDueGscRankGroups(input: {
   if (error) throw new Error(error.message);
 
   const results = [];
+  const touchedProjects = new Map<string, { projectId: string; ownerId: string }>();
   for (const group of groups || []) {
     const cadence = group.refresh_cadence === "weekly" ? "weekly" : "daily";
     if (!isRefreshDue(group.last_refreshed_at, cadence)) continue;
@@ -485,6 +587,10 @@ export async function refreshDueGscRankGroups(input: {
         metric,
         status: result.waitingData ? "waiting_data" : "succeeded",
       });
+      touchedProjects.set(group.project_id + "|" + group.owner_id, {
+        projectId: group.project_id,
+        ownerId: group.owner_id,
+      });
     } catch (error) {
       results.push({
         project_id: group.project_id,
@@ -493,6 +599,14 @@ export async function refreshDueGscRankGroups(input: {
         error: error instanceof Error ? error.message : "Group refresh failed.",
       });
     }
+  }
+
+  for (const project of touchedProjects.values()) {
+    await settleWaitingRankGroupPlans({
+      client: input.client,
+      projectId: project.projectId,
+      ownerId: project.ownerId,
+    });
   }
 
   return results;
