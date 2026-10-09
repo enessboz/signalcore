@@ -10,8 +10,9 @@ import { runSalesDiscoveryCampaign } from "@/lib/sales/discovery";
 import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
 import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForLead } from "@/lib/sales/prospect";
 import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
-import { runRankTrackingBatch, seedTrackedKeywordsFromGsc } from "@/lib/seo/rank-tracking";
+import { addTrackedKeywordList, runRankTrackingBatch, seedTrackedKeywordsFromGsc } from "@/lib/seo/rank-tracking";
 import { syncGscRankGroups } from "@/lib/seo/rank-groups";
+import { getLiveGscQueriesForPages, getLiveGscTopPages, getLiveGscTopQueries } from "@/lib/google/live-gsc";
 import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
 import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
 
@@ -652,6 +653,8 @@ export async function executeChiefActions(input: {
           "add_tracked_keywords",
           "seed_rank_from_gsc",
           "create_rank_groups_from_gsc",
+          "analyze_gsc_live",
+          "add_gsc_page_queries_to_rank_tracker",
           "run_rank_tracking",
           "configure_opportunity_engine",
           "run_opportunity_scan",
@@ -1291,6 +1294,247 @@ export async function executeChiefActions(input: {
             groups: grouped.groups,
             auto_refresh: action.rank_group_auto_refresh !== false,
             refresh_cadence: refreshCadence,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "analyze_gsc_live") {
+        const days = Math.min(
+          Math.max(Number(action.performance_window_days || 28), 1),
+          480,
+        );
+        const metric =
+          action.gsc_metric === "impressions" ? "impressions" : "clicks";
+        const limit = Math.min(
+          Math.max(Number(action.gsc_limit || 20), 1),
+          100,
+        );
+
+        if (action.gsc_analysis_dimension === "pages") {
+          const live = await getLiveGscTopPages({
+            client: supabase,
+            projectId: projectId!,
+            days,
+            metric,
+            limit,
+            pageContains: action.gsc_page_contains || null,
+          });
+
+          const top = live.rows.slice(0, limit);
+          const summaryLines = top
+            .slice(0, Math.min(top.length, 10))
+            .map(
+              (row) =>
+                "#" +
+                String(row.rank_order) +
+                " " +
+                row.page +
+                " — " +
+                Number(row.clicks).toLocaleString("en-US") +
+                " clicks / " +
+                Number(row.impressions).toLocaleString("en-US") +
+                " impressions",
+            );
+
+          results.push({
+            type: action.type,
+            status: "completed",
+            projectId,
+            summary:
+              "Live GSC " +
+              String(days) +
+              "-day page analysis completed." +
+              (summaryLines.length ? "\n" + summaryLines.join("\n") : " No matching pages found."),
+            data: {
+              source: live.source,
+              start_date: live.startDate,
+              end_date: live.endDate,
+              metric,
+              page_contains: live.pageContains,
+              rows: top,
+            },
+          });
+          continue;
+        }
+
+        const live = await getLiveGscTopQueries({
+          client: supabase,
+          projectId: projectId!,
+          days,
+          metric,
+          limit,
+        });
+
+        const top = live.rows.slice(0, limit);
+        const summaryLines = top
+          .slice(0, Math.min(top.length, 10))
+          .map(
+            (row) =>
+              "#" +
+              String(row.rank_order) +
+              " " +
+              row.query +
+              " — " +
+              Number(row.clicks).toLocaleString("en-US") +
+              " clicks / " +
+              Number(row.impressions).toLocaleString("en-US") +
+              " impressions",
+          );
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Live GSC " +
+            String(days) +
+            "-day query analysis completed." +
+            (summaryLines.length ? "\n" + summaryLines.join("\n") : " No matching queries found."),
+          data: {
+            source: live.source,
+            start_date: live.startDate,
+            end_date: live.endDate,
+            metric,
+            rows: top,
+          },
+        });
+        continue;
+      }
+
+      if (action.type === "add_gsc_page_queries_to_rank_tracker") {
+        const days = Math.min(
+          Math.max(Number(action.performance_window_days || 28), 1),
+          480,
+        );
+        const metric =
+          action.gsc_metric === "impressions" ? "impressions" : "clicks";
+        const pageLimit = Math.min(
+          Math.max(Number(action.gsc_page_limit || 10), 1),
+          30,
+        );
+        const keywordsPerPage = Math.min(
+          Math.max(Number(action.gsc_keywords_per_page || 5), 1),
+          100,
+        );
+
+        const pages = await getLiveGscTopPages({
+          client: supabase,
+          projectId: projectId!,
+          days,
+          metric,
+          limit: pageLimit,
+          pageContains: action.gsc_page_contains || null,
+        });
+
+        const pageUrls = pages.rows.map((row) => row.page);
+        if (!pageUrls.length) {
+          results.push({
+            type: action.type,
+            status: "completed",
+            projectId,
+            summary:
+              "Live GSC returned no matching pages for the requested filter, so no Rank Tracker keywords were added.",
+            data: {
+              start_date: pages.startDate,
+              end_date: pages.endDate,
+              page_contains: pages.pageContains,
+              pages: [],
+              inserted: 0,
+            },
+          });
+          continue;
+        }
+
+        const pageQueries = await getLiveGscQueriesForPages({
+          client: supabase,
+          projectId: projectId!,
+          days,
+          pages: pageUrls,
+          metric,
+          keywordsPerPage,
+        });
+
+        const keywordSource = new Map<
+          string,
+          { page: string; clicks: number; impressions: number; rank_order: number }
+        >();
+
+        for (const item of pageQueries.pages) {
+          for (const query of item.queries) {
+            const key = query.query.trim().toLocaleLowerCase("en-US");
+            const existing = keywordSource.get(key);
+            const primary =
+              metric === "impressions" ? query.impressions : query.clicks;
+            const existingPrimary = existing
+              ? metric === "impressions"
+                ? existing.impressions
+                : existing.clicks
+              : -1;
+            if (!existing || primary > existingPrimary) {
+              keywordSource.set(key, {
+                page: item.page,
+                clicks: query.clicks,
+                impressions: query.impressions,
+                rank_order: query.rank_order,
+              });
+            }
+          }
+        }
+
+        const keywords = Array.from(keywordSource.keys()).map((key) => {
+          const match = pageQueries.pages
+            .flatMap((item) => item.queries)
+            .find((query) => query.query.trim().toLocaleLowerCase("en-US") === key);
+          return match?.query || key;
+        });
+
+        const added = await addTrackedKeywordList({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          keywords,
+          source: "agent",
+          priority: action.rank_priority || "normal",
+          cadence: action.rank_cadence || "weekly",
+          client: supabase,
+        });
+
+        const pageSummary = pages.rows
+          .slice(0, 8)
+          .map(
+            (row) =>
+              row.page +
+              " (" +
+              Number(row.clicks).toLocaleString("en-US") +
+              " clicks, " +
+              Number(row.impressions).toLocaleString("en-US") +
+              " impressions)",
+          );
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Live GSC page→query analysis completed. Added " +
+            String(added.inserted) +
+            " new Rank Tracker keyword(s) from " +
+            String(pageUrls.length) +
+            " top page(s); " +
+            String(added.existing) +
+            " keyword(s) were already tracked." +
+            (pageSummary.length ? "\nTop pages:\n" + pageSummary.join("\n") : ""),
+          data: {
+            source: "gsc_live",
+            start_date: pages.startDate,
+            end_date: pages.endDate,
+            page_contains: pages.pageContains,
+            pages: pages.rows,
+            keywords_requested: added.requested,
+            keywords_inserted: added.inserted,
+            keywords_existing: added.existing,
+            tracked_keyword_ids: added.keywordIds,
+            page_queries: pageQueries.pages,
           },
         });
         continue;
