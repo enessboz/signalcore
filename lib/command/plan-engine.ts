@@ -270,3 +270,231 @@ export async function createAndExecuteCommandPlan(input: {
     results,
   };
 }
+
+
+export async function resumeReadyCommandPlans(input: {
+  client: SupabaseClient;
+  maxPlans?: number;
+}) {
+  const { data: plans, error: plansError } = await input.client
+    .from("command_plans")
+    .select("id,owner_id,status,current_step,total_steps")
+    .eq("status", "planned")
+    .order("updated_at", { ascending: true })
+    .limit(Math.min(Math.max(input.maxPlans || 5, 1), 25));
+
+  if (plansError) {
+    throw new Error("Ready command plans could not be loaded: " + plansError.message);
+  }
+
+  const summaries: Array<Record<string, unknown>> = [];
+
+  for (const plan of plans || []) {
+    const { data: steps, error: stepsError } = await input.client
+      .from("command_plan_steps")
+      .select("id,sequence,title,status,arguments,attempt_count")
+      .eq("plan_id", plan.id)
+      .eq("owner_id", plan.owner_id)
+      .order("sequence");
+
+    if (stepsError) {
+      summaries.push({
+        plan_id: plan.id,
+        status: "failed",
+        error: stepsError.message,
+      });
+      continue;
+    }
+
+    const pending = (steps || []).filter((step) => step.status === "pending");
+    let finalStatus: PlanStatus = pending.length ? "running" : "completed";
+    let completedNow = 0;
+
+    for (const step of pending) {
+      const action =
+        step.arguments && typeof step.arguments === "object"
+          ? (step.arguments as ChiefPlan["actions"][number])
+          : null;
+
+      if (!action?.type) {
+        const message = "Stored plan step has no executable action arguments.";
+        await input.client
+          .from("command_plan_steps")
+          .update({
+            status: "failed",
+            blocker_type: "invalid_step",
+            blocker_message: message,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", step.id)
+          .eq("owner_id", plan.owner_id);
+
+        await input.client
+          .from("command_plans")
+          .update({
+            status: "failed",
+            current_step: step.sequence,
+            last_error: message,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", plan.id)
+          .eq("owner_id", plan.owner_id);
+
+        finalStatus = "failed";
+        break;
+      }
+
+      const startedAt = new Date().toISOString();
+      await input.client
+        .from("command_plans")
+        .update({
+          status: "running",
+          current_step: step.sequence,
+          updated_at: startedAt,
+        })
+        .eq("id", plan.id)
+        .eq("owner_id", plan.owner_id);
+
+      await input.client
+        .from("command_plan_steps")
+        .update({
+          status: "running",
+          attempt_count: Number(step.attempt_count || 0) + 1,
+          started_at: startedAt,
+          blocker_type: null,
+          blocker_message: null,
+          updated_at: startedAt,
+        })
+        .eq("id", step.id)
+        .eq("owner_id", plan.owner_id);
+
+      const [result] = await executeChiefActions({
+        ownerId: plan.owner_id,
+        actions: [action],
+        stopOnFailure: true,
+        client: input.client,
+      });
+
+      const actual =
+        result ||
+        ({
+          type: action.type,
+          status: "failed",
+          summary: "Action did not return an execution result.",
+        } as CommandActionResult);
+
+      if (actual.status === "completed" || actual.status === "skipped") {
+        completedNow += 1;
+        await input.client
+          .from("command_plan_steps")
+          .update({
+            status: actual.status,
+            result: actual,
+            blocker_type: null,
+            blocker_message: null,
+            required_input: {},
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", step.id)
+          .eq("owner_id", plan.owner_id);
+        continue;
+      }
+
+      finalStatus = planStatusForResult(actual);
+      const classified =
+        actual.status === "failed"
+          ? classifyFailure(actual.summary)
+          : {
+              status:
+                finalStatus === "waiting_user"
+                  ? ("waiting_user" as const)
+                  : finalStatus === "waiting_data"
+                    ? ("waiting_data" as const)
+                    : finalStatus === "blocked_tool"
+                      ? ("blocked_tool" as const)
+                      : ("failed" as const),
+              blockerType:
+                finalStatus === "waiting_data"
+                  ? "data_dependency"
+                  : finalStatus === "blocked_tool"
+                    ? "tool_configuration"
+                    : finalStatus === "waiting_user"
+                      ? "user_input"
+                      : "execution_error",
+            };
+
+      await input.client
+        .from("command_plan_steps")
+        .update({
+          status: classified.status,
+          result: actual,
+          blocker_type: classified.blockerType,
+          blocker_message: actual.summary,
+          required_input:
+            classified.status === "waiting_user"
+              ? { requested: actual.summary }
+              : {},
+          completed_at:
+            classified.status === "failed" ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", step.id)
+        .eq("owner_id", plan.owner_id);
+
+      await input.client
+        .from("command_plans")
+        .update({
+          status: classified.status,
+          current_step: step.sequence,
+          last_error: actual.summary,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", plan.id)
+        .eq("owner_id", plan.owner_id);
+
+      break;
+    }
+
+    if (finalStatus === "running") {
+      const { count: remaining } = await input.client
+        .from("command_plan_steps")
+        .select("id", { count: "exact", head: true })
+        .eq("plan_id", plan.id)
+        .in("status", [
+          "pending",
+          "running",
+          "waiting_data",
+          "waiting_user",
+          "blocked_tool",
+        ]);
+
+      if (!remaining) {
+        finalStatus = "completed";
+      }
+    }
+
+    if (finalStatus === "completed") {
+      await input.client
+        .from("command_plans")
+        .update({
+          status: "completed",
+          current_step: plan.total_steps,
+          last_error: null,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", plan.id)
+        .eq("owner_id", plan.owner_id);
+    }
+
+    summaries.push({
+      plan_id: plan.id,
+      status: finalStatus,
+      completed_steps_now: completedNow,
+    });
+  }
+
+  return summaries;
+}
