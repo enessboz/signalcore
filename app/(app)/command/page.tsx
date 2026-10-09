@@ -56,7 +56,7 @@ export default async function CommandPage({
     selectedThreadId
       ? supabase
           .from("command_plans")
-          .select("id,title,objective,status,current_step,total_steps,last_error,created_at,updated_at")
+          .select("id,project_id,title,objective,status,current_step,total_steps,last_error,created_at,updated_at")
           .eq("thread_id", selectedThreadId)
           .order("created_at", { ascending: false })
           .limit(3)
@@ -67,10 +67,107 @@ export default async function CommandPage({
   const { data: planSteps } = latestPlan
     ? await supabase
         .from("command_plan_steps")
-        .select("id,sequence,title,action_type,status,blocker_type,blocker_message,result,updated_at")
+        .select("id,sequence,title,action_type,status,arguments,blocker_type,blocker_message,result,updated_at")
         .eq("plan_id", latestPlan.id)
         .order("sequence")
     : { data: [] };
+
+  const waitingRankStep = (planSteps || []).find(
+    (step) =>
+      step.action_type === "create_rank_groups_from_gsc" &&
+      step.status === "waiting_data",
+  );
+
+  const waitingArgs =
+    waitingRankStep?.arguments && typeof waitingRankStep.arguments === "object"
+      ? (waitingRankStep.arguments as Record<string, unknown>)
+      : {};
+  const requestedWindowDays = Math.min(
+    Math.max(Number(waitingArgs.performance_window_days || 0), 0),
+    480,
+  );
+
+  let waitingDataProgress:
+    | {
+        readyDays: number;
+        requestedDays: number;
+        missingDays: number;
+        startDate: string | null;
+        endDate: string | null;
+        queueStatus: string | null;
+        queueMode: string | null;
+        queuePriority: number | null;
+        lastWorkerStatus: string | null;
+        lastWorkerCompletedAt: string | null;
+      }
+    | null = null;
+
+  if (
+    latestPlan?.project_id &&
+    latestPlan.status === "waiting_data" &&
+    requestedWindowDays > 0
+  ) {
+    const [{ data: syncDays }, { data: repairJobs }, { data: workerRuns }] =
+      await Promise.all([
+        supabase
+          .from("google_sync_date_log")
+          .select("date")
+          .eq("project_id", latestPlan.project_id)
+          .eq("source", "gsc")
+          .eq("status", "succeeded")
+          .order("date", { ascending: false })
+          .limit(Math.min(requestedWindowDays + 10, 490)),
+        supabase
+          .from("google_sync_queue")
+          .select("status,mode,priority,created_at")
+          .eq("project_id", latestPlan.project_id)
+          .eq("source", "gsc")
+          .eq("mode", "repair")
+          .in("status", ["queued", "running"])
+          .order("priority", { ascending: false })
+          .order("created_at", { ascending: true })
+          .limit(1),
+        supabase
+          .from("runtime_worker_runs")
+          .select("status,completed_at")
+          .eq("worker_key", "data-sync")
+          .order("started_at", { ascending: false })
+          .limit(1),
+      ]);
+
+    const dates = Array.from(
+      new Set((syncDays || []).map((row) => String(row.date))),
+    ).sort();
+    const endDate = dates.length ? dates[dates.length - 1] : null;
+    let startDate: string | null = null;
+    let readyDays = 0;
+
+    if (endDate) {
+      const start = new Date(endDate + "T00:00:00Z");
+      start.setUTCDate(start.getUTCDate() - (requestedWindowDays - 1));
+      startDate = start.toISOString().slice(0, 10);
+      readyDays = dates.filter(
+        (date) => date >= startDate! && date <= endDate,
+      ).length;
+    }
+
+    const repair = repairJobs?.[0] || null;
+    const worker = workerRuns?.[0] || null;
+
+    waitingDataProgress = {
+      readyDays,
+      requestedDays: requestedWindowDays,
+      missingDays: Math.max(requestedWindowDays - readyDays, 0),
+      startDate,
+      endDate,
+      queueStatus: repair?.status || null,
+      queueMode: repair?.mode || null,
+      queuePriority:
+        typeof repair?.priority === "number" ? repair.priority : null,
+      lastWorkerStatus: worker?.status || null,
+      lastWorkerCompletedAt: worker?.completed_at || null,
+    };
+  }
 
   const apiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
@@ -284,6 +381,73 @@ export default async function CommandPage({
                   </div>
                 ))}
               </div>
+
+              {waitingDataProgress ? (
+                <div className="commandDataProgress">
+                  <div className="commandDataProgressTop">
+                    <div>
+                      <strong>
+                        {waitingDataProgress.readyDays}/
+                        {waitingDataProgress.requestedDays}{" "}
+                        {tr ? "gün hazır" : "days ready"}
+                      </strong>
+                      <span>
+                        {waitingDataProgress.missingDays}{" "}
+                        {tr ? "gün eksik" : "days missing"}
+                      </span>
+                    </div>
+                    <span
+                      className={
+                        "commandDataQueueState commandDataQueueState-" +
+                        (waitingDataProgress.queueStatus || "idle")
+                      }
+                    >
+                      {waitingDataProgress.queueStatus
+                        ? waitingDataProgress.queueStatus.toUpperCase()
+                        : tr
+                          ? "BEKLİYOR"
+                          : "WAITING"}
+                    </span>
+                  </div>
+                  <div className="commandDataProgressBar">
+                    <span
+                      style={{
+                        width:
+                          Math.min(
+                            (waitingDataProgress.readyDays /
+                              waitingDataProgress.requestedDays) *
+                              100,
+                            100,
+                          ) + "%",
+                      }}
+                    />
+                  </div>
+                  <div className="commandDataProgressMeta">
+                    <span>
+                      GSC window:{" "}
+                      {waitingDataProgress.startDate || "—"} →{" "}
+                      {waitingDataProgress.endDate || "—"}
+                    </span>
+                    <span>
+                      {tr ? "Repair" : "Repair"}:{" "}
+                      {waitingDataProgress.queueStatus || "—"}
+                      {waitingDataProgress.queuePriority !== null
+                        ? " · P" + waitingDataProgress.queuePriority
+                        : ""}
+                    </span>
+                    <span>
+                      {tr ? "Son data-sync" : "Last data-sync"}:{" "}
+                      {waitingDataProgress.lastWorkerStatus || "—"}
+                      {waitingDataProgress.lastWorkerCompletedAt
+                        ? " · " +
+                          new Date(
+                            waitingDataProgress.lastWorkerCompletedAt,
+                          ).toLocaleString(tr ? "tr-TR" : "en-GB")
+                        : ""}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               {latestPlan.last_error ? (
                 <div className="commandPlanBlocker">
