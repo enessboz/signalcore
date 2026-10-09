@@ -295,7 +295,8 @@ export default async function RankTrackerPage({
     };
   });
 
-  const latestHistoryByKeyword = new Map<string, (typeof recentHistory)[number]>();
+  type HistoryRow = NonNullable<typeof recentHistory>[number];
+  const latestHistoryByKeyword = new Map<string, HistoryRow>();
   for (const row of recentHistory || []) {
     if (!latestHistoryByKeyword.has(row.tracked_keyword_id)) {
       latestHistoryByKeyword.set(row.tracked_keyword_id, row);
