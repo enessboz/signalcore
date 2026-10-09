@@ -37,12 +37,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!process.env.DATAFORSEO_LOGIN || !process.env.DATAFORSEO_PASSWORD) {
-    return NextResponse.json(
-      { error: "DataForSEO credentials are not configured." },
-      { status: 503 },
-    );
-  }
+  const dataForSeoReady = Boolean(
+    process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
+  );
 
   const supabase = createAdminClient();
   const lease = await acquireRuntimeLease({
@@ -105,6 +102,40 @@ export async function POST(request: NextRequest) {
         error: error instanceof Error ? error.message : "GSC auto seed failed.",
       });
     }
+  }
+
+  if (!dataForSeoReady) {
+    const failedGroupRefreshes = groupRefreshResults.filter(
+      (item) => item.status === "failed",
+    ).length;
+
+    await finishRuntimeWorkerRun({
+      client: supabase,
+      tracker: runtimeRun,
+      status: failedGroupRefreshes ? "partial" : "succeeded",
+      metrics: {
+        recovered_stale_runs: recoveredStaleRuns,
+        rank_groups_refreshed: groupRefreshResults.filter(
+          (item) => item.status === "succeeded",
+        ).length,
+        rank_groups_waiting_data: groupRefreshResults.filter(
+          (item) => item.status === "waiting_data",
+        ).length,
+        rank_groups_failed: failedGroupRefreshes,
+        seed_projects: seedResults.length,
+        rank_checks_skipped: true,
+        rank_checks_skip_reason: "DataForSEO credentials are not configured.",
+      },
+    });
+
+    return NextResponse.json({
+      recovered_stale_runs: recoveredStaleRuns,
+      rank_group_refresh_results: groupRefreshResults,
+      seed_results: seedResults,
+      rank_checks_skipped: true,
+      reason: "DataForSEO credentials are not configured.",
+      time: new Date().toISOString(),
+    });
   }
 
   const { data: activeRows, error: keywordError } = await supabase
