@@ -284,6 +284,120 @@ async function writeRankFinding(input: {
   }
 }
 
+export async function addTrackedKeywordList(input: {
+  ownerId: string;
+  projectId: string;
+  keywords: string[];
+  source?: "manual" | "gsc_auto" | "gsc_group" | "agent";
+  priority?: "high" | "normal" | "low";
+  cadence?: "daily" | "weekly" | "monthly";
+  client?: SupabaseClient;
+}) {
+  const supabase = input.client || (await createClient());
+  const unique = Array.from(
+    new Set(
+      input.keywords
+        .map((keyword) => keyword.trim())
+        .filter(Boolean)
+        .map((keyword) => keyword.slice(0, 300)),
+    ),
+  ).slice(0, 1000);
+
+  if (!unique.length) {
+    return {
+      requested: 0,
+      inserted: 0,
+      existing: 0,
+      keywordIds: [] as string[],
+    };
+  }
+
+  const { data: settings } = await supabase
+    .from("rank_tracking_settings")
+    .select("default_location_code,default_language_code,default_device")
+    .eq("project_id", input.projectId)
+    .eq("owner_id", input.ownerId)
+    .maybeSingle();
+
+  const locationCode = Number(settings?.default_location_code || 2840);
+  const languageCode = String(settings?.default_language_code || "en");
+  const device = settings?.default_device === "mobile" ? "mobile" : "desktop";
+
+  await supabase.from("rank_tracking_settings").upsert(
+    {
+      project_id: input.projectId,
+      owner_id: input.ownerId,
+      active: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "project_id" },
+  );
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("tracked_keywords")
+    .select("id,keyword,location_code,language_code,device")
+    .eq("project_id", input.projectId)
+    .eq("owner_id", input.ownerId)
+    .eq("location_code", locationCode)
+    .eq("language_code", languageCode)
+    .eq("device", device)
+    .limit(5000);
+
+  if (existingError) throw new Error(existingError.message);
+
+  const existingByKeyword = new Map(
+    (existingRows || []).map((row) => [
+      row.keyword.trim().toLocaleLowerCase("en-US"),
+      row.id as string,
+    ]),
+  );
+
+  const missing = unique.filter(
+    (keyword) => !existingByKeyword.has(keyword.toLocaleLowerCase("en-US")),
+  );
+
+  let insertedRows: Array<{ id: string; keyword: string }> = [];
+  if (missing.length) {
+    const { data, error } = await supabase
+      .from("tracked_keywords")
+      .insert(
+        missing.map((keyword) => ({
+          project_id: input.projectId,
+          owner_id: input.ownerId,
+          keyword,
+          source: input.source || "agent",
+          priority: input.priority || "normal",
+          cadence: input.cadence || "weekly",
+          depth: 30,
+          location_code: locationCode,
+          language_code: languageCode,
+          device,
+          active: true,
+          updated_at: new Date().toISOString(),
+        })),
+      )
+      .select("id,keyword");
+
+    if (error) throw new Error("Tracked keyword insert failed: " + error.message);
+    insertedRows = data || [];
+  }
+
+  for (const row of insertedRows) {
+    existingByKeyword.set(row.keyword.trim().toLocaleLowerCase("en-US"), row.id);
+  }
+
+  return {
+    requested: unique.length,
+    inserted: insertedRows.length,
+    existing: unique.length - insertedRows.length,
+    keywordIds: unique
+      .map((keyword) =>
+        existingByKeyword.get(keyword.toLocaleLowerCase("en-US")),
+      )
+      .filter((value): value is string => Boolean(value)),
+  };
+}
+
 export async function seedTrackedKeywordsFromGsc(input: {
   ownerId: string;
   projectId: string;
