@@ -498,3 +498,169 @@ export async function resumeReadyCommandPlans(input: {
 
   return summaries;
 }
+
+
+export async function createWaitingUserCommandPlan(input: {
+  client: SupabaseClient;
+  ownerId: string;
+  threadId: string;
+  sourceMessageId: string;
+  objective: string;
+  question: string;
+  model: string;
+  usage: { inputTokens: number; outputTokens: number };
+  existingPlanId?: string | null;
+}) {
+  const now = new Date().toISOString();
+
+  if (input.existingPlanId) {
+    const { data: existingStep } = await input.client
+      .from("command_plan_steps")
+      .select("id,sequence")
+      .eq("plan_id", input.existingPlanId)
+      .eq("owner_id", input.ownerId)
+      .eq("status", "waiting_user")
+      .order("sequence", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingStep?.id) {
+      await input.client
+        .from("command_plan_steps")
+        .update({
+          blocker_type: "user_input",
+          blocker_message: input.question,
+          required_input: { requested: input.question },
+          updated_at: now,
+        })
+        .eq("id", existingStep.id)
+        .eq("owner_id", input.ownerId);
+
+      await input.client
+        .from("command_plans")
+        .update({
+          status: "waiting_user",
+          current_step: existingStep.sequence,
+          last_error: input.question,
+          updated_at: now,
+        })
+        .eq("id", input.existingPlanId)
+        .eq("owner_id", input.ownerId);
+
+      return { planId: input.existingPlanId, reused: true };
+    }
+  }
+
+  const { data: plan, error: planError } = await input.client
+    .from("command_plans")
+    .insert({
+      thread_id: input.threadId,
+      source_message_id: input.sourceMessageId,
+      owner_id: input.ownerId,
+      title: input.objective.trim().slice(0, 96) || "Need user input",
+      objective: input.objective,
+      status: "waiting_user",
+      current_step: 1,
+      total_steps: 1,
+      planner_model: input.model,
+      planner_usage: {
+        input_tokens: input.usage.inputTokens,
+        output_tokens: input.usage.outputTokens,
+      },
+      context: { clarification_only: true },
+      last_error: input.question,
+      updated_at: now,
+    })
+    .select("id")
+    .single();
+
+  if (planError || !plan) {
+    throw new Error(planError?.message || "Waiting-user plan could not be created.");
+  }
+
+  const { error: stepError } = await input.client
+    .from("command_plan_steps")
+    .insert({
+      plan_id: plan.id,
+      owner_id: input.ownerId,
+      sequence: 1,
+      title: "Need your input",
+      action_type: "request_user_input",
+      status: "waiting_user",
+      arguments: {},
+      blocker_type: "user_input",
+      blocker_message: input.question,
+      required_input: { requested: input.question },
+      attempt_count: 0,
+      updated_at: now,
+    });
+
+  if (stepError) {
+    await input.client
+      .from("command_plans")
+      .update({
+        status: "failed",
+        last_error: stepError.message,
+        updated_at: now,
+      })
+      .eq("id", plan.id)
+      .eq("owner_id", input.ownerId);
+    throw new Error(stepError.message);
+  }
+
+  return { planId: plan.id as string, reused: false };
+}
+
+export async function resolveWaitingUserCommandPlan(input: {
+  client: SupabaseClient;
+  ownerId: string;
+  planId: string;
+  userInput: string;
+}) {
+  const now = new Date().toISOString();
+  const { data: step } = await input.client
+    .from("command_plan_steps")
+    .select("id,sequence,result")
+    .eq("plan_id", input.planId)
+    .eq("owner_id", input.ownerId)
+    .eq("status", "waiting_user")
+    .order("sequence", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!step?.id) return false;
+
+  await input.client
+    .from("command_plan_steps")
+    .update({
+      status: "completed",
+      result: {
+        ...(step.result && typeof step.result === "object"
+          ? (step.result as Record<string, unknown>)
+          : {}),
+        user_input_received: true,
+        user_input: input.userInput.slice(0, 4000),
+      },
+      blocker_type: null,
+      blocker_message: null,
+      required_input: {},
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq("id", step.id)
+    .eq("owner_id", input.ownerId);
+
+  await input.client
+    .from("command_plans")
+    .update({
+      status: "completed",
+      current_step: step.sequence,
+      last_error: null,
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq("id", input.planId)
+    .eq("owner_id", input.ownerId);
+
+  return true;
+}
