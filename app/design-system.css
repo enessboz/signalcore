@@ -1761,3 +1761,31 @@ body {
   font-size: 9px;
   line-height: 1.45;
 }
+
+
+/* Rank group source signal */
+.rankGroupSourceMetric {
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.rankGroupSourceMetric strong {
+  min-width: 28px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  color: #5148bf;
+  background: #efedff;
+  font-size: 10px;
+  text-align: center;
+}
+.rankGroupSourceMetric span {
+  color: #3d4555;
+  font-size: 10px;
+  font-weight: 700;
+}
+.rankGroupSourceMetric small {
+  color: #8a93a4;
+  font-size: 9px;
+}
