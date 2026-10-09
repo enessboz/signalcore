@@ -1,15 +1,17 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProjectDataNav } from "@/components/project-data-nav";
+import { getLocale } from "@/lib/i18n";
 import { createClient } from "@/lib/supabase/server";
 import {
   addTrackedKeywords,
-  deleteTrackedKeyword,
-  runRankCheck,
+  assignRankTag,
+  createRankTag,
+  deleteRankTag,
+  runRankCheckFromForm,
   saveRankTrackingSettings,
   seedFromGsc,
-  updateTrackedKeyword,
 } from "./actions";
+import { RankTrackerWorkspace } from "./rank-tracker-workspace";
 
 export const maxDuration = 300;
 
@@ -19,36 +21,14 @@ function scalar(value: string | string[] | undefined, fallback = "") {
   return Array.isArray(value) ? value[0] || fallback : value || fallback;
 }
 
-function compactUrl(value: string | null | undefined) {
-  if (!value) return "—";
-  try {
-    const url = new URL(value);
-    return url.hostname + (url.pathname === "/" ? "" : url.pathname);
-  } catch {
-    return value;
-  }
+function isoDaysBefore(endDate: string, days: number) {
+  const date = new Date(endDate + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
-function formatPosition(value: number | null | undefined) {
-  return value === null || value === undefined ? "Not found" : "#" + value;
-}
-
-function movement(
-  current: number | null | undefined,
-  previous: number | null | undefined,
-) {
-  if (current === null || current === undefined) {
-    return previous !== null && previous !== undefined
-      ? { label: "Lost from depth", className: "rankMoveDown" }
-      : { label: "—", className: "" };
-  }
-  if (previous === null || previous === undefined) {
-    return { label: "New #" + current, className: "rankMoveNew" };
-  }
-  const diff = previous - current;
-  if (diff > 0) return { label: "↑ " + diff, className: "rankMoveUp" };
-  if (diff < 0) return { label: "↓ " + Math.abs(diff), className: "rankMoveDown" };
-  return { label: "—", className: "" };
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export default async function RankTrackerPage({
@@ -60,8 +40,7 @@ export default async function RankTrackerPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const selectedKeywordId = scalar(query.keyword);
-  const selectedGroupId = scalar(query.group);
+  const locale = await getLocale();
   const supabase = await createClient();
 
   const [
@@ -69,11 +48,12 @@ export default async function RankTrackerPage({
     { data: settings },
     { data: keywords },
     { data: recentHistory },
-    { data: runs },
     { data: gscState },
     { data: usage },
     { data: keywordGroups },
     { data: groupMembers },
+    { data: manualTags },
+    { data: tagMembers },
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -87,23 +67,21 @@ export default async function RankTrackerPage({
       .maybeSingle(),
     supabase
       .from("tracked_keywords")
-      .select("id,keyword,target_url,source,priority,cadence,depth,location_code,language_code,device,active,last_checked_at,last_position,last_ranking_url,last_status,last_error,consecutive_failures,created_at")
+      .select(
+        "id,keyword,target_url,source,priority,cadence,depth,location_code,language_code,device,active,last_checked_at,last_position,last_ranking_url,last_status,last_error,consecutive_failures,created_at",
+      )
       .eq("project_id", id)
       .order("priority")
       .order("keyword")
-      .limit(1000),
+      .limit(3000),
     supabase
       .from("rank_history")
-      .select("id,tracked_keyword_id,checked_at,position,ranking_url,ranking_title,matched_domain,organic_result_count,serp_features,top_competitors,cost,metadata")
+      .select(
+        "id,tracked_keyword_id,checked_at,position,ranking_url,ranking_title,matched_domain,organic_result_count,serp_features,top_competitors,cost,metadata",
+      )
       .eq("project_id", id)
       .order("checked_at", { ascending: false })
-      .limit(2500),
-    supabase
-      .from("rank_tracking_runs")
-      .select("id,trigger_type,status,keywords_requested,keywords_completed,succeeded,failed,actual_cost,result,error,started_at,completed_at")
-      .eq("project_id", id)
-      .order("started_at", { ascending: false })
-      .limit(20),
+      .limit(8000),
     supabase
       .from("google_sync_states")
       .select("last_complete_date,last_success_at,status,last_error")
@@ -124,14 +102,27 @@ export default async function RankTrackerPage({
       ),
     supabase
       .from("rank_keyword_groups")
-      .select("id,name,group_key,source,metric,window_days,keyword_limit,auto_refresh_enabled,refresh_cadence,last_refreshed_at,last_data_date,last_status,last_error,metadata")
+      .select(
+        "id,name,group_key,source,metric,window_days,keyword_limit,auto_refresh_enabled,refresh_cadence,last_refreshed_at,last_data_date,last_status,last_error,metadata",
+      )
       .eq("project_id", id)
       .order("created_at", { ascending: true }),
     supabase
       .from("rank_keyword_group_members")
-      .select("group_id,tracked_keyword_id,rank_order,metric_value,secondary_metric_value,source_snapshot")
+      .select(
+        "group_id,tracked_keyword_id,rank_order,metric_value,secondary_metric_value,source_snapshot",
+      )
       .eq("project_id", id)
       .order("rank_order", { ascending: true }),
+    supabase
+      .from("rank_keyword_tags")
+      .select("id,name,slug,color_key,created_at,updated_at")
+      .eq("project_id", id)
+      .order("name"),
+    supabase
+      .from("rank_keyword_tag_members")
+      .select("tag_id,tracked_keyword_id")
+      .eq("project_id", id),
   ]);
 
   if (!project) notFound();
@@ -152,742 +143,439 @@ export default async function RankTrackerPage({
     last_worker_run_at: null,
   };
 
-  const historiesByKeyword = new Map<string, NonNullable<typeof recentHistory>>();
+  const keywordNames = Array.from(
+    new Set((keywords || []).map((item) => item.keyword).filter(Boolean)),
+  );
+  const fallbackEnd = new Date(Date.now() - 2 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const gscEnd = gscState?.last_complete_date || fallbackEnd;
+  const gscStart = isoDaysBefore(gscEnd, 29);
+
+  const { data: gscRows } = keywordNames.length
+    ? await supabase
+        .from("gsc_query_daily")
+        .select("query,date,clicks,impressions,ctr,position")
+        .eq("project_id", id)
+        .in("query", keywordNames.slice(0, 1000))
+        .gte("date", gscStart)
+        .lte("date", gscEnd)
+        .limit(15000)
+    : { data: [] };
+
+  const gscByQuery = new Map<
+    string,
+    {
+      clicks: number;
+      impressions: number;
+      weightedPosition: number;
+      weight: number;
+    }
+  >();
+
+  for (const row of gscRows || []) {
+    const key = String(row.query || "").trim().toLocaleLowerCase("en-US");
+    if (!key) continue;
+    const current = gscByQuery.get(key) || {
+      clicks: 0,
+      impressions: 0,
+      weightedPosition: 0,
+      weight: 0,
+    };
+    const impressions = Number(row.impressions || 0);
+    current.clicks += Number(row.clicks || 0);
+    current.impressions += impressions;
+    current.weightedPosition += Number(row.position || 0) * Math.max(impressions, 1);
+    current.weight += Math.max(impressions, 1);
+    gscByQuery.set(key, current);
+  }
+
+  const historiesByKeyword = new Map<
+    string,
+    NonNullable<typeof recentHistory>
+  >();
   for (const row of recentHistory || []) {
     const list = historiesByKeyword.get(row.tracked_keyword_id) || [];
-    if (list.length < 30) list.push(row);
+    if (list.length < 45) list.push(row);
     historiesByKeyword.set(row.tracked_keyword_id, list);
   }
 
-  const enriched = (keywords || []).map((keyword) => {
+  const groupsByKeyword = new Map<
+    string,
+    Array<{ id: string; name: string; color: string }>
+  >();
+  const groupById = new Map(
+    (keywordGroups || []).map((group) => [group.id, group] as const),
+  );
+  for (const member of groupMembers || []) {
+    const group = groupById.get(member.group_id);
+    if (!group) continue;
+    const list = groupsByKeyword.get(member.tracked_keyword_id) || [];
+    list.push({
+      id: group.id,
+      name: group.name,
+      color: group.metric === "impressions" ? "blue" : "purple",
+    });
+    groupsByKeyword.set(member.tracked_keyword_id, list);
+  }
+
+  const tagsByKeyword = new Map<
+    string,
+    Array<{ id: string; name: string; color: string }>
+  >();
+  const tagById = new Map(
+    (manualTags || []).map((tag) => [tag.id, tag] as const),
+  );
+  for (const member of tagMembers || []) {
+    const tag = tagById.get(member.tag_id);
+    if (!tag) continue;
+    const list = tagsByKeyword.get(member.tracked_keyword_id) || [];
+    list.push({
+      id: tag.id,
+      name: tag.name,
+      color: tag.color_key || "purple",
+    });
+    tagsByKeyword.set(member.tracked_keyword_id, list);
+  }
+
+  const shapedKeywords = (keywords || []).map((keyword) => {
     const history = historiesByKeyword.get(keyword.id) || [];
     const latest = history[0] || null;
     const previous = history[1] || null;
+    const bestPosition = history
+      .map((item) =>
+        item.position === null || item.position === undefined
+          ? null
+          : Number(item.position),
+      )
+      .filter((value): value is number => value !== null)
+      .reduce<number | null>(
+        (best, value) => (best === null || value < best ? value : best),
+        null,
+      );
+    const gsc =
+      gscByQuery.get(keyword.keyword.trim().toLocaleLowerCase("en-US")) || null;
+    const clicks = Number(gsc?.clicks || 0);
+    const impressions = Number(gsc?.impressions || 0);
+
     return {
-      ...keyword,
-      latest,
-      previous,
-      movement: movement(latest?.position, previous?.position),
+      id: keyword.id,
+      keyword: keyword.keyword,
+      targetUrl: keyword.target_url,
+      source: keyword.source,
+      priority: keyword.priority,
+      cadence: keyword.cadence,
+      depth: Number(keyword.depth || 30),
+      locationCode: Number(keyword.location_code || 2840),
+      languageCode: keyword.language_code || "en",
+      device: keyword.device || "desktop",
+      active: Boolean(keyword.active),
+      lastCheckedAt: keyword.last_checked_at,
+      lastPosition:
+        keyword.last_position === null || keyword.last_position === undefined
+          ? null
+          : Number(keyword.last_position),
+      lastRankingUrl: keyword.last_ranking_url,
+      lastStatus: keyword.last_status || "idle",
+      lastError: keyword.last_error,
+      latestPosition:
+        latest?.position === null || latest?.position === undefined
+          ? null
+          : Number(latest.position),
+      previousPosition:
+        previous?.position === null || previous?.position === undefined
+          ? null
+          : Number(previous.position),
+      bestPosition,
+      gscClicks: clicks,
+      gscImpressions: impressions,
+      gscCtr: impressions ? clicks / impressions : 0,
+      groups: groupsByKeyword.get(keyword.id) || [],
+      tags: tagsByKeyword.get(keyword.id) || [],
     };
   });
 
-  const memberIdsByGroup = new Map<string, Set<string>>();
-  for (const member of groupMembers || []) {
-    const set = memberIdsByGroup.get(member.group_id) || new Set<string>();
-    set.add(member.tracked_keyword_id);
-    memberIdsByGroup.set(member.group_id, set);
+  const latestHistoryByKeyword = new Map<string, (typeof recentHistory)[number]>();
+  for (const row of recentHistory || []) {
+    if (!latestHistoryByKeyword.has(row.tracked_keyword_id)) {
+      latestHistoryByKeyword.set(row.tracked_keyword_id, row);
+    }
   }
 
-  const selectedGroup =
-    (keywordGroups || []).find((group) => group.id === selectedGroupId) || null;
+  const dailyKeywordLatest = new Map<
+    string,
+    { date: string; keywordId: string; position: number | null }
+  >();
+  for (const row of recentHistory || []) {
+    const date = String(row.checked_at).slice(0, 10);
+    const key = date + "|" + row.tracked_keyword_id;
+    if (!dailyKeywordLatest.has(key)) {
+      dailyKeywordLatest.set(key, {
+        date,
+        keywordId: row.tracked_keyword_id,
+        position:
+          row.position === null || row.position === undefined
+            ? null
+            : Number(row.position),
+      });
+    }
+  }
 
-  const selectedMembershipByKeyword = new Map(
-    (groupMembers || [])
-      .filter((member) => member.group_id === selectedGroupId)
-      .map((member) => [member.tracked_keyword_id, member] as const),
-  );
+  const trendBuckets = new Map<
+    string,
+    {
+      positionSum: number;
+      ranked: number;
+      visibilitySum: number;
+      checked: number;
+    }
+  >();
 
-  const visibleKeywords = selectedGroupId
-    ? enriched
-        .filter((item) =>
-          memberIdsByGroup.get(selectedGroupId)?.has(item.id),
-        )
-        .sort(
-          (a, b) =>
-            Number(selectedMembershipByKeyword.get(a.id)?.rank_order || 9999) -
-            Number(selectedMembershipByKeyword.get(b.id)?.rank_order || 9999),
-        )
-    : enriched;
+  for (const item of dailyKeywordLatest.values()) {
+    const bucket = trendBuckets.get(item.date) || {
+      positionSum: 0,
+      ranked: 0,
+      visibilitySum: 0,
+      checked: 0,
+    };
+    bucket.checked += 1;
+    if (item.position !== null) {
+      bucket.positionSum += item.position;
+      bucket.ranked += 1;
+      bucket.visibilitySum +=
+        Math.max(0, 1 - (Math.min(item.position, 100) - 1) / 100) * 100;
+    }
+    trendBuckets.set(item.date, bucket);
+  }
 
-  const activeKeywords = enriched.filter((item) => item.active);
-  const top10 = activeKeywords.filter(
-    (item) => item.last_position !== null && Number(item.last_position) <= 10,
-  ).length;
-  const top3 = activeKeywords.filter(
-    (item) => item.last_position !== null && Number(item.last_position) <= 3,
-  ).length;
-  const notFoundCount = activeKeywords.filter(
-    (item) => item.last_checked_at && item.last_position === null,
-  ).length;
-  const winners = enriched.filter(
-    (item) =>
-      item.latest?.position !== null &&
-      item.latest?.position !== undefined &&
-      item.previous?.position !== null &&
-      item.previous?.position !== undefined &&
-      Number(item.latest.position) < Number(item.previous.position),
-  ).length;
-  const losers = enriched.filter(
-    (item) =>
-      item.latest?.position !== null &&
-      item.latest?.position !== undefined &&
-      item.previous?.position !== null &&
-      item.previous?.position !== undefined &&
-      Number(item.latest.position) > Number(item.previous.position),
-  ).length;
+  const trend = Array.from(trendBuckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-30)
+    .map(([date, bucket]) => ({
+      date,
+      avgPosition: bucket.ranked
+        ? bucket.positionSum / bucket.ranked
+        : 0,
+      visibility: bucket.checked
+        ? bucket.visibilitySum / bucket.checked
+        : 0,
+      checked: bucket.checked,
+    }));
+
+  const landingMap = new Map<
+    string,
+    {
+      url: string;
+      keywordCount: number;
+      positionSum: number;
+      ranked: number;
+      top10: number;
+      clicks: number;
+      impressions: number;
+    }
+  >();
+
+  for (const item of shapedKeywords) {
+    const url = item.lastRankingUrl || item.targetUrl;
+    if (!url) continue;
+    const current = landingMap.get(url) || {
+      url,
+      keywordCount: 0,
+      positionSum: 0,
+      ranked: 0,
+      top10: 0,
+      clicks: 0,
+      impressions: 0,
+    };
+    current.keywordCount += 1;
+    if (item.lastPosition !== null) {
+      current.ranked += 1;
+      current.positionSum += item.lastPosition;
+      if (item.lastPosition <= 10) current.top10 += 1;
+    }
+    current.clicks += item.gscClicks;
+    current.impressions += item.gscImpressions;
+    landingMap.set(url, current);
+  }
+
+  const landingPages = Array.from(landingMap.values())
+    .map((item) => ({
+      url: item.url,
+      keywordCount: item.keywordCount,
+      avgPosition: item.ranked ? item.positionSum / item.ranked : null,
+      top10: item.top10,
+      clicks: item.clicks,
+      impressions: item.impressions,
+    }))
+    .sort(
+      (a, b) =>
+        b.clicks - a.clicks ||
+        b.keywordCount - a.keywordCount ||
+        (a.avgPosition || 999) - (b.avgPosition || 999),
+    )
+    .slice(0, 100);
+
+  const competitorMap = new Map<
+    string,
+    { appearances: number; rankSum: number; rankCount: number }
+  >();
+  const featureMap = new Map<string, number>();
+
+  for (const row of latestHistoryByKeyword.values()) {
+    for (const raw of asArray(row.top_competitors)) {
+      if (!raw || typeof raw !== "object") continue;
+      const item = raw as Record<string, unknown>;
+      const domain = String(item.domain || "").trim();
+      if (!domain) continue;
+      const rank = Number(item.rank || 0);
+      const current = competitorMap.get(domain) || {
+        appearances: 0,
+        rankSum: 0,
+        rankCount: 0,
+      };
+      current.appearances += 1;
+      if (rank > 0) {
+        current.rankSum += rank;
+        current.rankCount += 1;
+      }
+      competitorMap.set(domain, current);
+    }
+
+    for (const raw of asArray(row.serp_features)) {
+      const name =
+        typeof raw === "string"
+          ? raw
+          : raw && typeof raw === "object"
+            ? String(
+                (raw as Record<string, unknown>).type ||
+                  (raw as Record<string, unknown>).name ||
+                  "SERP feature",
+              )
+            : "";
+      if (!name) continue;
+      featureMap.set(name, (featureMap.get(name) || 0) + 1);
+    }
+  }
+
+  const competitors = Array.from(competitorMap.entries())
+    .map(([domain, item]) => ({
+      domain,
+      appearances: item.appearances,
+      avgRank: item.rankCount ? item.rankSum / item.rankCount : 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.appearances - a.appearances || a.avgRank - b.avgRank,
+    )
+    .slice(0, 50);
+
+  const serpFeatures = Array.from(featureMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  const groupCounts = new Map<string, number>();
+  for (const member of groupMembers || []) {
+    groupCounts.set(member.group_id, (groupCounts.get(member.group_id) || 0) + 1);
+  }
+
+  const groups = (keywordGroups || []).map((group) => ({
+    id: group.id,
+    name: group.name,
+    source: group.source,
+    metric: group.metric,
+    windowDays: Number(group.window_days || 28),
+    keywordLimit: Number(group.keyword_limit || 20),
+    count: groupCounts.get(group.id) || 0,
+    lastStatus: group.last_status || "idle",
+    lastDataDate: group.last_data_date,
+    autoRefreshEnabled: Boolean(group.auto_refresh_enabled),
+    refreshCadence: group.refresh_cadence || "daily",
+  }));
+
+  const tagCounts = new Map<string, number>();
+  for (const member of tagMembers || []) {
+    tagCounts.set(member.tag_id, (tagCounts.get(member.tag_id) || 0) + 1);
+  }
+
+  const tags = (manualTags || []).map((tag) => ({
+    id: tag.id,
+    name: tag.name,
+    color: tag.color_key || "purple",
+    count: tagCounts.get(tag.id) || 0,
+  }));
+
   const monthSpend = (usage || []).reduce(
     (sum, item) =>
       sum + Number(item.actual_cost ?? item.estimated_cost ?? 0),
     0,
   );
-  const selectedKeyword =
-    enriched.find((item) => item.id === selectedKeywordId) || null;
-  const selectedHistory = selectedKeyword
-    ? historiesByKeyword.get(selectedKeyword.id) || []
-    : [];
 
   const dataForSeoReady = Boolean(
     process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
   );
 
-  return (
-    <div className="page">
-      <header className="pageHeader">
-        <div>
-          <p className="eyebrow">Exact SERP monitoring</p>
-          <h1>{project.name} · Rank Tracker</h1>
-          <p className="muted">
-            Track exact Google positions by location and device. GSC remains the
-            first-party visibility source; rank checks provide controlled SERP snapshots.
-          </p>
-        </div>
-        <div className="buttonRow">
-          <span className={dataForSeoReady ? "readinessBadge readinessReady" : "readinessBadge readinessOptional"}>
-            DataForSEO {dataForSeoReady ? "ready" : "waiting"}
-          </span>
-          <Link href={"/projects/" + id} className="ghostButton">
-            Back to project
-          </Link>
-        </div>
-      </header>
+  const actions = {
+    runRankCheck: runRankCheckFromForm.bind(null, id),
+    saveSettings: saveRankTrackingSettings.bind(null, id),
+    addKeywords: addTrackedKeywords.bind(null, id),
+    seedFromGsc: seedFromGsc.bind(null, id),
+    createTag: createRankTag.bind(null, id),
+    assignTag: assignRankTag.bind(null, id),
+    deleteTag: deleteRankTag.bind(null, id),
+  };
 
+  return (
+    <div className="page rankTrackerPage">
       <ProjectDataNav projectId={id} active="rank" />
 
       {scalar(query.error) ? (
-        <p className="formMessage formError pageMessage">{scalar(query.error)}</p>
+        <p className="formMessage formError pageMessage">
+          {scalar(query.error)}
+        </p>
       ) : null}
       {scalar(query.message) ? (
-        <p className="formMessage formSuccess pageMessage">{scalar(query.message)}</p>
+        <p className="formMessage formSuccess pageMessage">
+          {scalar(query.message)}
+        </p>
       ) : null}
 
-      <section className="healthGrid rankHealthGrid">
-        <article className="healthCard">
-          <span>Active keywords</span>
-          <strong>{activeKeywords.length}</strong>
-          <small>{enriched.length} total saved</small>
-        </article>
-        <article className="healthCard">
-          <span>Top 3</span>
-          <strong>{top3}</strong>
-          <small>{top10} in top 10</small>
-        </article>
-        <article className="healthCard">
-          <span>Winners / losers</span>
-          <strong>{winners} / {losers}</strong>
-          <small>Latest check vs previous</small>
-        </article>
-        <article className="healthCard">
-          <span>Not found</span>
-          <strong>{notFoundCount}</strong>
-          <small>Outside configured monitored depth</small>
-        </article>
-        <article className="healthCard">
-          <span>SERP spend this month</span>
-          <strong>{"$" + monthSpend.toFixed(4)}</strong>
-          <small>Rank + manual SERP research</small>
-        </article>
-        <article className="healthCard">
-          <span>GSC warehouse</span>
-          <strong>{gscState?.last_complete_date || "—"}</strong>
-          <small>{gscState?.status || "not synced"}</small>
-        </article>
-      </section>
-
-      <div className="twoCol rankSetupGrid">
-        <section className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2>Automation & GSC discovery</h2>
-              <p>
-                SignalCore can select high-signal GSC queries automatically and
-                assign cost-aware daily/weekly tracking.
-              </p>
-            </div>
-          </div>
-
-          <form
-            className="formPanel"
-            action={saveRankTrackingSettings.bind(null, id)}
-          >
-            <div className="formGrid2">
-              <label className="checkboxLabel">
-                <input
-                  name="active"
-                  type="checkbox"
-                  defaultChecked={Boolean(config.active)}
-                />
-                Background rank tracking active
-              </label>
-              <label className="checkboxLabel">
-                <input
-                  name="autoDiscover"
-                  type="checkbox"
-                  defaultChecked={Boolean(config.auto_discover_enabled)}
-                />
-                Auto-discover keywords from GSC
-              </label>
-              <label className="checkboxLabel">
-                <input
-                  name="autoFindings"
-                  type="checkbox"
-                  defaultChecked={Boolean(config.auto_findings_enabled)}
-                />
-                Create rank change findings
-              </label>
-              <label>
-                Max auto keywords
-                <input
-                  name="maxAutoKeywords"
-                  type="number"
-                  min="0"
-                  max="1000"
-                  defaultValue={config.max_auto_keywords}
-                />
-              </label>
-              <label>
-                Min 28-day impressions
-                <input
-                  name="minImpressions"
-                  type="number"
-                  min="0"
-                  defaultValue={config.min_impressions_28d}
-                />
-              </label>
-              <label>
-                GSC position range
-                <div className="inlineInputPair">
-                  <input
-                    name="positionMin"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    defaultValue={config.position_min}
-                  />
-                  <input
-                    name="positionMax"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    defaultValue={config.position_max}
-                  />
-                </div>
-              </label>
-              <label>
-                Default location code
-                <input
-                  name="locationCode"
-                  type="number"
-                  defaultValue={config.default_location_code}
-                />
-              </label>
-              <label>
-                Language
-                <input
-                  name="languageCode"
-                  defaultValue={config.default_language_code}
-                />
-              </label>
-              <label>
-                Device
-                <select name="device" defaultValue={config.default_device}>
-                  <option value="desktop">Desktop</option>
-                  <option value="mobile">Mobile</option>
-                </select>
-              </label>
-              <label>
-                Daily high-priority limit
-                <input
-                  name="dailyHighPriorityLimit"
-                  type="number"
-                  min="0"
-                  max="200"
-                  defaultValue={config.daily_high_priority_limit}
-                />
-              </label>
-            </div>
-
-            <div className="buttonRow">
-              <button className="primaryButton" type="submit">
-                Save settings
-              </button>
-              <button
-                className="secondaryButton"
-                formAction={seedFromGsc.bind(null, id)}
-                type="submit"
-                disabled={!gscState?.last_complete_date}
-              >
-                Seed from GSC now
-              </button>
-            </div>
-
-            <p className="muted">
-              Last GSC seed:{" "}
-              {config.last_seeded_at
-                ? new Date(config.last_seeded_at).toLocaleString("en-GB")
-                : "never"}.
-              High-priority auto keywords are daily; remaining candidates are weekly.
-            </p>
-          </form>
-        </section>
-
-        <section className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2>Add tracked keywords</h2>
-              <p>Manual keywords remain explicit and are not removed by GSC auto-discovery.</p>
-            </div>
-          </div>
-
-          <form
-            className="formPanel"
-            action={addTrackedKeywords.bind(null, id)}
-          >
-            <label>
-              Keywords · one per line
-              <textarea
-                name="keywords"
-                rows={8}
-                required
-                placeholder={"best calorie tracker\ncalorie deficit calculator\nhow many calories should i eat"}
-              />
-            </label>
-            <label>
-              Target URL · optional
-              <input name="targetUrl" placeholder="https://example.com/page/" />
-            </label>
-            <div className="formGrid2">
-              <label>
-                Priority
-                <select name="priority" defaultValue="normal">
-                  <option value="high">High</option>
-                  <option value="normal">Normal</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
-              <label>
-                Cadence
-                <select name="cadence" defaultValue="weekly">
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </label>
-              <label>
-                SERP depth
-                <select name="depth" defaultValue="30">
-                  <option value="10">Top 10</option>
-                  <option value="20">Top 20</option>
-                  <option value="30">Top 30</option>
-                  <option value="50">Top 50</option>
-                  <option value="100">Top 100</option>
-                </select>
-              </label>
-              <label>
-                Location code
-                <input
-                  name="locationCode"
-                  type="number"
-                  defaultValue={config.default_location_code}
-                />
-              </label>
-              <label>
-                Language
-                <input
-                  name="languageCode"
-                  defaultValue={config.default_language_code}
-                />
-              </label>
-              <label>
-                Device
-                <select name="device" defaultValue={config.default_device}>
-                  <option value="desktop">Desktop</option>
-                  <option value="mobile">Mobile</option>
-                </select>
-              </label>
-            </div>
-            <button className="primaryButton" type="submit">
-              Add keywords
-            </button>
-          </form>
-        </section>
-      </div>
-
-      {(keywordGroups || []).length ? (
-        <section className="panel rankGroupsPanel">
-          <div className="panelHeader">
-            <div>
-              <h2>Keyword groups</h2>
-              <p>
-                Dynamic GSC groups stay separate even when the same keyword belongs
-                to more than one group.
-              </p>
-            </div>
-            {selectedGroup ? (
-              <Link className="ghostButton" href={"/projects/" + id + "/rank-tracker"}>
-                Show all keywords
-              </Link>
-            ) : null}
-          </div>
-          <div className="rankGroupGrid">
-            {(keywordGroups || []).map((group) => {
-              const count = memberIdsByGroup.get(group.id)?.size || 0;
-              return (
-                <Link
-                  key={group.id}
-                  href={"/projects/" + id + "/rank-tracker?group=" + group.id}
-                  className={
-                    selectedGroupId === group.id
-                      ? "rankGroupCard active"
-                      : "rankGroupCard"
-                  }
-                >
-                  <div className="rankGroupCardTop">
-                    <span className="sourceBadge">
-                      {group.metric || group.source.replaceAll("_", " ")}
-                    </span>
-                    <span
-                      className={
-                        group.last_status === "succeeded"
-                          ? "healthGood"
-                          : group.last_status === "failed"
-                            ? "healthBad"
-                            : ""
-                      }
-                    >
-                      {group.last_status}
-                    </span>
-                  </div>
-                  <strong>{group.name}</strong>
-                  <div className="rankGroupMetrics">
-                    <div>
-                      <b>{count}</b>
-                      <span>keywords</span>
-                    </div>
-                    <div>
-                      <b>{group.window_days}d</b>
-                      <span>GSC window</span>
-                    </div>
-                    <div>
-                      <b>{group.auto_refresh_enabled ? group.refresh_cadence : "manual"}</b>
-                      <span>refresh</span>
-                    </div>
-                  </div>
-                  <small>
-                    Data: {group.last_data_date || "waiting"} · Last refresh:{" "}
-                    {group.last_refreshed_at
-                      ? new Date(group.last_refreshed_at).toLocaleString("en-GB")
-                      : "never"}
-                  </small>
-                  {group.last_error ? <p>{group.last_error}</p> : null}
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="panel">
-        <div className="panelHeader">
-          <div>
-            <h2>
-              {selectedGroup ? selectedGroup.name : "Tracked keywords"}
-            </h2>
-            <p>
-              Position is an exact configured SERP snapshot. “Not found” means the
-              project domain did not appear inside that keyword’s monitored depth.
-            </p>
-          </div>
-          <form action={runRankCheck.bind(null, id, undefined)}>
-            <button
-              className="primaryButton"
-              type="submit"
-              disabled={!dataForSeoReady || !activeKeywords.length}
-            >
-              Check next 10 now
-            </button>
-          </form>
-        </div>
-
-        {visibleKeywords.length ? (
-          <div className="rankKeywordList">
-            {visibleKeywords.map((keyword) => (
-              <article
-                className={keyword.active ? "rankKeywordCard" : "rankKeywordCard inactive"}
-                key={keyword.id}
-              >
-                <div className="rankKeywordHeader">
-                  <div>
-                    <p className="eyebrow">
-                      {keyword.source.replaceAll("_", " ")} · {keyword.device} ·{" "}
-                      {keyword.location_code}
-                    </p>
-                    <h3>{keyword.keyword}</h3>
-                    {selectedGroup ? (() => {
-                      const membership = selectedMembershipByKeyword.get(keyword.id);
-                      if (!membership) return null;
-                      const primaryLabel =
-                        selectedGroup.metric === "impressions"
-                          ? "impressions"
-                          : "clicks";
-                      const secondaryLabel =
-                        selectedGroup.metric === "impressions"
-                          ? "clicks"
-                          : "impressions";
-                      return (
-                        <div className="rankGroupSourceMetric">
-                          <strong>#{membership.rank_order}</strong>
-                          <span>
-                            {Number(membership.metric_value).toLocaleString("en-US")}{" "}
-                            {primaryLabel}
-                          </span>
-                          <small>
-                            {Number(membership.secondary_metric_value).toLocaleString("en-US")}{" "}
-                            {secondaryLabel}
-                          </small>
-                        </div>
-                      );
-                    })() : null}
-                  </div>
-                  <div className="rankPositionBlock">
-                    <strong>{formatPosition(keyword.last_position)}</strong>
-                    <span className={keyword.movement.className}>
-                      {keyword.movement.label}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rankKeywordMeta">
-                  <div>
-                    <strong>Ranking URL</strong>
-                    <span>{compactUrl(keyword.last_ranking_url)}</span>
-                  </div>
-                  <div>
-                    <strong>Cadence</strong>
-                    <span>{keyword.cadence} · top {keyword.depth}</span>
-                  </div>
-                  <div>
-                    <strong>Last check</strong>
-                    <span>
-                      {keyword.last_checked_at
-                        ? new Date(keyword.last_checked_at).toLocaleString("en-GB")
-                        : "Never"}
-                    </span>
-                  </div>
-                  <div>
-                    <strong>Status</strong>
-                    <span>{keyword.last_status}</span>
-                  </div>
-                </div>
-
-                {keyword.last_error ? (
-                  <p className="formMessage formError">{keyword.last_error}</p>
-                ) : null}
-
-                <form
-                  className="rankKeywordControls"
-                  action={updateTrackedKeyword.bind(null, id, keyword.id)}
-                >
-                  <label>
-                    Priority
-                    <select name="priority" defaultValue={keyword.priority}>
-                      <option value="high">High</option>
-                      <option value="normal">Normal</option>
-                      <option value="low">Low</option>
-                    </select>
-                  </label>
-                  <label>
-                    Cadence
-                    <select name="cadence" defaultValue={keyword.cadence}>
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                    </select>
-                  </label>
-                  <label>
-                    Depth
-                    <select name="depth" defaultValue={String(keyword.depth)}>
-                      <option value="10">10</option>
-                      <option value="20">20</option>
-                      <option value="30">30</option>
-                      <option value="50">50</option>
-                      <option value="100">100</option>
-                    </select>
-                  </label>
-                  <label>
-                    Target URL
-                    <input
-                      name="targetUrl"
-                      defaultValue={keyword.target_url || ""}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label className="checkboxLabel">
-                    <input
-                      name="active"
-                      type="checkbox"
-                      defaultChecked={keyword.active}
-                    />
-                    Active
-                  </label>
-                  <button className="ghostButton" type="submit">
-                    Save
-                  </button>
-                </form>
-
-                <div className="buttonRow">
-                  <form action={runRankCheck.bind(null, id, keyword.id)}>
-                    <button
-                      className="secondaryButton"
-                      type="submit"
-                      disabled={!dataForSeoReady}
-                    >
-                      Check now
-                    </button>
-                  </form>
-                  <Link
-                    className="ghostButton"
-                    href={"/projects/" + id + "/rank-tracker?keyword=" + keyword.id}
-                  >
-                    History
-                  </Link>
-                  <form action={deleteTrackedKeyword.bind(null, id, keyword.id)}>
-                    <button className="ghostButton" type="submit">
-                      Remove
-                    </button>
-                  </form>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="emptyState">
-            <strong>
-              {selectedGroup ? "No keywords in this group yet" : "No tracked keywords yet"}
-            </strong>
-            <span>
-              {selectedGroup
-                ? "This group is waiting for GSC data or its next refresh."
-                : "Add keywords manually or seed a cost-controlled set from the GSC warehouse."}
-            </span>
-          </div>
-        )}
-      </section>
-
-      {selectedKeyword ? (
-        <section className="panel">
-          <div className="panelHeader">
-            <div>
-              <p className="eyebrow">Position history</p>
-              <h2>{selectedKeyword.keyword}</h2>
-              <p>
-                {selectedKeyword.device} · location {selectedKeyword.location_code} ·{" "}
-                {selectedKeyword.language_code} · depth {selectedKeyword.depth}
-              </p>
-            </div>
-            <Link className="ghostButton" href={"/projects/" + id + "/rank-tracker"}>
-              Close history
-            </Link>
-          </div>
-
-          {selectedHistory.length ? (
-            <div className="dataTableWrap">
-              <table className="dataTable">
-                <thead>
-                  <tr>
-                    <th>Checked</th>
-                    <th>Position</th>
-                    <th>Ranking URL</th>
-                    <th>Results</th>
-                    <th>Features</th>
-                    <th>Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedHistory.map((row) => (
-                    <tr key={row.id}>
-                      <td>{new Date(row.checked_at).toLocaleString("en-GB")}</td>
-                      <td>{formatPosition(row.position)}</td>
-                      <td>
-                        <span className="cellEllipsis">
-                          {compactUrl(row.ranking_url)}
-                        </span>
-                      </td>
-                      <td>{row.organic_result_count}</td>
-                      <td>
-                        {Array.isArray(row.serp_features)
-                          ? row.serp_features.slice(0, 4).join(", ") || "—"
-                          : "—"}
-                      </td>
-                      <td>{"$" + Number(row.cost || 0).toFixed(4)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="emptyState smallEmpty">
-              <span>No rank history yet.</span>
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      <section className="panel">
-        <div className="panelHeader">
-          <div>
-            <h2>Recent rank runs</h2>
-            <p>Manual and background batches with recorded provider cost.</p>
-          </div>
-        </div>
-        {(runs || []).length ? (
-          <div className="dataTableWrap">
-            <table className="dataTable">
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>Trigger</th>
-                  <th>Status</th>
-                  <th>Completed</th>
-                  <th>Succeeded</th>
-                  <th>Failed</th>
-                  <th>Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(runs || []).map((run) => (
-                  <tr key={run.id}>
-                    <td>{new Date(run.started_at).toLocaleString("en-GB")}</td>
-                    <td>{run.trigger_type}</td>
-                    <td>
-                      <span className={"jobStatus job-" + run.status}>
-                        {run.status}
-                      </span>
-                    </td>
-                    <td>{run.keywords_completed}/{run.keywords_requested}</td>
-                    <td>{run.succeeded}</td>
-                    <td>{run.failed}</td>
-                    <td>{"$" + Number(run.actual_cost || 0).toFixed(4)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="emptyState smallEmpty">
-            <span>No rank tracking runs yet.</span>
-          </div>
-        )}
-      </section>
+      <RankTrackerWorkspace
+        project={{
+          id: project.id,
+          name: project.name,
+          domain: project.domain,
+        }}
+        locale={locale === "tr" ? "tr" : "en"}
+        dataForSeoReady={dataForSeoReady}
+        settings={{
+          active: Boolean(config.active),
+          auto_discover_enabled: Boolean(config.auto_discover_enabled),
+          auto_findings_enabled: Boolean(config.auto_findings_enabled),
+          max_auto_keywords: Number(config.max_auto_keywords || 100),
+          min_impressions_28d: Number(config.min_impressions_28d || 100),
+          position_min: Number(config.position_min || 1),
+          position_max: Number(config.position_max || 30),
+          default_location_code: Number(config.default_location_code || 2840),
+          default_language_code: config.default_language_code || "en",
+          default_device: config.default_device || "desktop",
+          daily_high_priority_limit: Number(
+            config.daily_high_priority_limit || 20,
+          ),
+          last_seeded_at: config.last_seeded_at,
+          last_worker_run_at: config.last_worker_run_at,
+        }}
+        keywords={shapedKeywords}
+        trend={trend}
+        groups={groups}
+        tags={tags}
+        landingPages={landingPages}
+        competitors={competitors}
+        serpFeatures={serpFeatures}
+        monthSpend={monthSpend}
+        gscLastDate={gscState?.last_complete_date || null}
+        gscStatus={gscState?.status || null}
+        actions={actions}
+      />
     </div>
   );
 }
