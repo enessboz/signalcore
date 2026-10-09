@@ -31,7 +31,7 @@ async function testOpenAi() {
     body: JSON.stringify({
       model,
       input: "Return exactly OK.",
-      max_output_tokens: 8,
+      max_output_tokens: 16,
     }),
     cache: "no-store",
   });
