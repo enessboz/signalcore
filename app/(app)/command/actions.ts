@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { estimateModelCost } from "@/lib/agents/openai";
 import { planChiefOperatorCommand } from "@/lib/command/chief";
-import { executeChiefActions } from "@/lib/command/executor";
+import { createAndExecuteCommandPlan } from "@/lib/command/plan-engine";
 import { createClient } from "@/lib/supabase/server";
 
 function textValue(formData: FormData, key: string) {
@@ -151,6 +151,30 @@ export async function sendChiefCommand(formData: FormData) {
       .limit(100),
   ]);
 
+  const { data: activePlans } = await supabase
+    .from("command_plans")
+    .select("id,title,objective,status,current_step,total_steps,last_error,created_at,updated_at")
+    .eq("thread_id", threadId)
+    .eq("owner_id", ownerId)
+    .in("status", ["planned","running","waiting_data","waiting_user","blocked_tool","failed"])
+    .order("created_at", { ascending: false })
+    .limit(3);
+
+  const activePlanIds = (activePlans || []).map((plan) => plan.id);
+  const { data: activePlanSteps } = activePlanIds.length
+    ? await supabase
+        .from("command_plan_steps")
+        .select("plan_id,sequence,title,action_type,status,blocker_type,blocker_message,result,updated_at")
+        .eq("owner_id", ownerId)
+        .in("plan_id", activePlanIds)
+        .order("sequence")
+    : { data: [] };
+
+  const activeWorkPlans = (activePlans || []).map((plan) => ({
+    ...plan,
+    steps: (activePlanSteps || []).filter((step) => step.plan_id === plan.id),
+  }));
+
   if (!chief || !["testing", "active"].includes(chief.status)) {
     redirect(`/command?thread=${threadId}&error=Chief%20Operator%20is%20not%20available`);
   }
@@ -169,6 +193,7 @@ export async function sendChiefCommand(formData: FormData) {
       rank_tracking_settings: rankSettings || [],
       tracked_keywords: trackedKeywords || [],
       opportunity_engine_settings: opportunitySettings || [],
+      active_work_plans: activeWorkPlans,
       allowed_internal_actions: [
         "create_project",
         "delegate_agent",
@@ -192,6 +217,7 @@ export async function sendChiefCommand(formData: FormData) {
         "configure_rank_tracking",
         "add_tracked_keywords",
         "seed_rank_from_gsc",
+        "create_rank_groups_from_gsc",
         "run_rank_tracking",
         "configure_opportunity_engine",
         "run_opportunity_scan",
@@ -226,25 +252,71 @@ export async function sendChiefCommand(formData: FormData) {
       workspaceContext,
     });
 
-    const actionResults = result.plan.needs_clarification
-      ? []
-      : await executeChiefActions({
+    const model =
+      process.env.OPENAI_ROUTINE_MODEL || chief.default_model || "gpt-6-luna";
+
+    const execution = result.plan.needs_clarification
+      ? {
+          planId: null,
+          status: "completed" as const,
+          results: [],
+        }
+      : await createAndExecuteCommandPlan({
+          client: supabase,
           ownerId,
+          threadId,
+          sourceMessageId: userMessage.id,
+          objective: message,
+          model,
+          usage: result.usage,
           actions: result.plan.actions,
+          continuationOf:
+            activeWorkPlans.length === 1 &&
+            ["waiting_user", "blocked_tool", "waiting_data"].includes(
+              activeWorkPlans[0].status,
+            )
+              ? activeWorkPlans[0].id
+              : null,
         });
+
+    const actionResults = execution.results;
 
     const actionSummary = actionResults.length
       ? "\n\n" +
         actionResults
-          .map((action) => `• ${action.status === "completed" ? "Done" : action.status === "failed" ? "Failed" : "Skipped"}: ${action.summary}`)
+          .map((action) => {
+            const label =
+              action.status === "completed"
+                ? "Done"
+                : action.status === "waiting_data"
+                  ? "Waiting for data"
+                  : action.status === "waiting_user"
+                    ? "Needs your input"
+                    : action.status === "blocked_tool"
+                      ? "Tool blocked"
+                      : action.status === "failed"
+                        ? "Failed"
+                        : "Skipped";
+            return `• ${label}: ${action.summary}`;
+          })
           .join("\n")
       : "";
 
+    const planStateNote =
+      execution.status === "waiting_data"
+        ? "\n\nThe work plan is paused at the current step while the required first-party data is prepared. Completed steps will not be repeated."
+        : execution.status === "waiting_user"
+          ? "\n\nThe work plan is paused at the current step and needs your input before continuing. Completed steps will not be repeated."
+          : execution.status === "blocked_tool"
+            ? "\n\nThe work plan is paused because a tool/configuration dependency needs to be fixed. Completed steps will not be repeated."
+            : execution.status === "failed"
+              ? "\n\nThe work plan stopped at the failed step. Later steps remain pending."
+              : "";
+
     const assistantText = result.plan.needs_clarification
       ? `${result.plan.reply}\n\n${result.plan.clarification_question || "I need one detail before I can continue."}`
-      : `${result.plan.reply}${actionSummary}`;
+      : `${result.plan.reply}${actionSummary}${planStateNote}`;
 
-    const model = process.env.OPENAI_ROUTINE_MODEL || chief.default_model || "gpt-6-luna";
     const cost = estimateModelCost(
       model,
       result.usage.inputTokens,
@@ -265,6 +337,8 @@ export async function sendChiefCommand(formData: FormData) {
           output_tokens: result.usage.outputTokens,
           estimated_cost: cost,
           needs_clarification: result.plan.needs_clarification,
+          plan_id: execution.planId,
+          plan_status: execution.status,
         },
       })
       .select("id")
@@ -283,18 +357,27 @@ export async function sendChiefCommand(formData: FormData) {
         message_id: assistantMessage.id,
         owner_id: ownerId,
         action_type: action.type,
-        status:
-          executed?.status === "completed"
-            ? "completed"
-            : executed?.status === "failed"
-              ? "failed"
-              : "planned",
+        status: executed?.status || "planned",
         project_id: executed?.projectId || null,
         target_agent_key: executed?.targetAgentKey || action.agent_key || null,
         arguments: action,
-        result: executed || {},
-        error: executed?.status === "failed" ? executed.summary : null,
-        completed_at: executed ? new Date().toISOString() : null,
+        result: {
+          ...(executed || {}),
+          plan_id: execution.planId,
+          plan_status: execution.status,
+        },
+        error:
+          executed &&
+          ["failed", "blocked_tool", "waiting_user", "waiting_data"].includes(
+            executed.status,
+          )
+            ? executed.summary
+            : null,
+        completed_at:
+          executed &&
+          ["completed", "failed", "skipped"].includes(executed.status)
+            ? new Date().toISOString()
+            : null,
       });
     }
 
