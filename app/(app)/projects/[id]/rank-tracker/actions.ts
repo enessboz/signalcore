@@ -13,6 +13,17 @@ function text(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function slugifyTag(value: string) {
+  return value
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 function splitKeywords(value: string) {
   return Array.from(
     new Set(
@@ -353,4 +364,176 @@ export async function deleteTrackedKeyword(
       projectId +
       "/rank-tracker?message=Tracked%20keyword%20removed",
   );
+}
+
+
+export async function createRankTag(
+  projectId: string,
+  formData: FormData,
+) {
+  const name = text(formData, "name").slice(0, 80);
+  const colorKey = ["purple","green","blue","amber","red","gray"].includes(
+    text(formData, "colorKey"),
+  )
+    ? text(formData, "colorKey")
+    : "purple";
+  const slug = slugifyTag(name);
+
+  if (!name || !slug) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/rank-tracker?error=" +
+        encodeURIComponent("Tag name is required"),
+    );
+  }
+
+  const { supabase, ownerId } = await auth();
+  const { error } = await supabase.from("rank_keyword_tags").upsert(
+    {
+      project_id: projectId,
+      owner_id: ownerId,
+      name,
+      slug,
+      color_key: colorKey,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "project_id,owner_id,slug" },
+  );
+
+  if (error) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/rank-tracker?error=" +
+        encodeURIComponent(error.message),
+    );
+  }
+
+  revalidatePath("/projects/" + projectId + "/rank-tracker");
+  redirect(
+    "/projects/" +
+      projectId +
+      "/rank-tracker?message=" +
+      encodeURIComponent("Tag saved"),
+  );
+}
+
+export async function assignRankTag(
+  projectId: string,
+  formData: FormData,
+) {
+  const tagId = text(formData, "tagId");
+  const keywordIds = Array.from(
+    new Set(
+      text(formData, "keywordIds")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 1000);
+
+  if (!tagId || !keywordIds.length) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/rank-tracker?error=" +
+        encodeURIComponent("Select a tag and at least one keyword"),
+    );
+  }
+
+  const { supabase, ownerId } = await auth();
+  const { data: tag } = await supabase
+    .from("rank_keyword_tags")
+    .select("id")
+    .eq("id", tagId)
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  if (!tag) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/rank-tracker?error=" +
+        encodeURIComponent("Tag not found"),
+    );
+  }
+
+  const { data: validKeywords } = await supabase
+    .from("tracked_keywords")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId)
+    .in("id", keywordIds);
+
+  const rows = (validKeywords || []).map((keyword) => ({
+    tag_id: tagId,
+    tracked_keyword_id: keyword.id,
+    project_id: projectId,
+    owner_id: ownerId,
+  }));
+
+  if (rows.length) {
+    const { error } = await supabase
+      .from("rank_keyword_tag_members")
+      .upsert(rows, { onConflict: "tag_id,tracked_keyword_id" });
+    if (error) {
+      redirect(
+        "/projects/" +
+          projectId +
+          "/rank-tracker?error=" +
+          encodeURIComponent(error.message),
+      );
+    }
+  }
+
+  revalidatePath("/projects/" + projectId + "/rank-tracker");
+  redirect(
+    "/projects/" +
+      projectId +
+      "/rank-tracker?message=" +
+      encodeURIComponent(String(rows.length) + " keyword(s) tagged"),
+  );
+}
+
+export async function deleteRankTag(
+  projectId: string,
+  formData: FormData,
+) {
+  const tagId = text(formData, "tagId");
+  if (!tagId) return;
+
+  const { supabase, ownerId } = await auth();
+  const { error } = await supabase
+    .from("rank_keyword_tags")
+    .delete()
+    .eq("id", tagId)
+    .eq("project_id", projectId)
+    .eq("owner_id", ownerId);
+
+  if (error) {
+    redirect(
+      "/projects/" +
+        projectId +
+        "/rank-tracker?error=" +
+        encodeURIComponent(error.message),
+    );
+  }
+
+  revalidatePath("/projects/" + projectId + "/rank-tracker");
+  redirect(
+    "/projects/" +
+      projectId +
+      "/rank-tracker?message=" +
+      encodeURIComponent("Tag removed"),
+  );
+}
+
+export async function runRankCheckFromForm(
+  projectId: string,
+  formData: FormData,
+) {
+  const keywordId = text(formData, "keywordId") || undefined;
+  return runRankCheck(projectId, keywordId);
 }
