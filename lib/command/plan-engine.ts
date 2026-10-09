@@ -190,6 +190,17 @@ export async function createAndExecuteCommandPlan(input: {
       } as CommandActionResult);
     results.push(actual);
 
+    if (actual.projectId) {
+      await input.client
+        .from("command_plans")
+        .update({
+          project_id: actual.projectId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", plan.id)
+        .eq("owner_id", input.ownerId);
+    }
+
     if (actual.status === "completed" || actual.status === "skipped") {
       await input.client
         .from("command_plan_steps")
