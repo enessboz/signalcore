@@ -321,7 +321,17 @@ async function syncOneGroup(input: {
   }
 
   const members = rows
-    .map((row) => {
+    .map((row): {
+      group_id: string;
+      tracked_keyword_id: string;
+      project_id: string;
+      owner_id: string;
+      rank_order: number;
+      metric_value: number;
+      secondary_metric_value: number;
+      source_snapshot: Record<string, unknown>;
+      updated_at: string;
+    } | null => {
       const trackedKeywordId = trackedByKeyword.get(row.query.trim().toLowerCase());
       if (!trackedKeywordId) return null;
       return {
@@ -346,7 +356,21 @@ async function syncOneGroup(input: {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter(Boolean);
+    .filter(
+      (
+        member,
+      ): member is {
+        group_id: string;
+        tracked_keyword_id: string;
+        project_id: string;
+        owner_id: string;
+        rank_order: number;
+        metric_value: number;
+        secondary_metric_value: number;
+        source_snapshot: Record<string, unknown>;
+        updated_at: string;
+      } => member !== null,
+    );
 
   const { error: deleteError } = await input.client
     .from("rank_keyword_group_members")
@@ -405,8 +429,10 @@ export async function syncGscRankGroups(input: {
   const client = input.client || (await createClient());
   const days = Math.min(Math.max(Number(input.days || 28), 1), 480);
   const limit = Math.min(Math.max(Number(input.limit || 20), 1), 100);
-  const metrics = Array.from(
-    new Set(input.metrics?.length ? input.metrics : ["clicks", "impressions"]),
+  const metrics: GscRankGroupMetric[] = Array.from(
+    new Set<GscRankGroupMetric>(
+      input.metrics?.length ? input.metrics : ["clicks", "impressions"],
+    ),
   );
   const refreshCadence = input.refreshCadence || "daily";
 
