@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { createClient } from "@/lib/supabase/server";
 import { getLocale } from "@/lib/i18n";
 import { scheduleDescription, type ScheduleConfig, type ScheduleKind } from "@/lib/command/schedule";
@@ -83,6 +84,7 @@ export default async function CommandPage({
 
   return (
     <div className="page commandPage">
+      <AutoRefresh intervalMs={15000} />
       <header className="pageHeader">
         <div>
           <p className="eyebrow">{tr ? "Yönetici kontrolü" : "Executive control"}</p>
