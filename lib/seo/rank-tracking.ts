@@ -9,7 +9,7 @@ export type TrackedKeywordRow = {
   owner_id: string;
   keyword: string;
   target_url: string | null;
-  source: "manual" | "gsc_auto" | "agent";
+  source: "manual" | "gsc_auto" | "gsc_group" | "agent";
   priority: "high" | "normal" | "low";
   cadence: "daily" | "weekly" | "monthly";
   depth: number;
