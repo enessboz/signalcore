@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { getLiveGscTopQueries } from "@/lib/google/live-gsc";
 
 export type GscRankGroupMetric = "clicks" | "impressions";
 
@@ -216,35 +217,6 @@ async function syncOneGroup(input: {
     };
   }
 
-  const window = await warehouseWindowReady({
-    client: input.client,
-    projectId: input.projectId,
-    days: input.days,
-  });
-
-  if (!window.ready) {
-    await input.client
-      .from("rank_keyword_groups")
-      .update({
-        last_status: "partial",
-        last_error: window.reason,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", group.id)
-      .eq("owner_id", input.ownerId);
-
-    return {
-      groupId: group.id,
-      groupName: group.name,
-      metric: input.metric,
-      refreshed: false,
-      waitingData: true,
-      keywords: 0,
-      dataDate: window.newestDate,
-      reason: window.reason,
-    };
-  }
-
   await input.client
     .from("rank_keyword_groups")
     .update({
@@ -255,18 +227,24 @@ async function syncOneGroup(input: {
     .eq("id", group.id)
     .eq("owner_id", input.ownerId);
 
-  const { data, error } = await input.client.rpc("get_gsc_top_queries", {
-    p_project_id: input.projectId,
-    p_days: input.days,
-    p_metric: input.metric,
-    p_limit: input.limit,
+  const live = await getLiveGscTopQueries({
+    client: input.client,
+    projectId: input.projectId,
+    days: input.days,
+    metric: input.metric,
+    limit: input.limit,
   });
-  if (error) {
-    throw new Error("GSC top-query selection failed: " + error.message);
-  }
 
-  const payload = (data || {}) as TopQueryPayload;
-  const rows = (payload.rows || []).filter((row) => row.query?.trim());
+  const payload: TopQueryPayload = {
+    available: true,
+    metric: input.metric,
+    requested_days: input.days,
+    coverage_days: input.days,
+    current_start: live.startDate,
+    current_end: live.endDate,
+    rows: live.rows,
+  };
+  const rows = live.rows.filter((row) => row.query?.trim());
 
   const { data: settings } = await input.client
     .from("rank_tracking_settings")
@@ -422,12 +400,12 @@ async function syncOneGroup(input: {
     .from("rank_keyword_groups")
     .update({
       last_refreshed_at: new Date().toISOString(),
-      last_data_date: payload.current_end || window.newestDate,
+      last_data_date: payload.current_end || null,
       last_status: "succeeded",
       last_error: null,
       metadata: {
         current_start: payload.current_start || null,
-        current_end: payload.current_end || window.newestDate,
+        current_end: payload.current_end || null,
         selected_keywords: members.length,
       },
       updated_at: new Date().toISOString(),
@@ -442,7 +420,7 @@ async function syncOneGroup(input: {
     refreshed: true,
     waitingData: false,
     keywords: members.length,
-    dataDate: payload.current_end || window.newestDate,
+    dataDate: payload.current_end || null,
     rows,
   };
 }
