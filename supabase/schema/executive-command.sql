@@ -35,7 +35,10 @@ create table if not exists public.command_actions (
   owner_id uuid not null,
   action_type text not null,
   status text not null default 'planned'
-    check (status in ('planned','executing','completed','failed','awaiting_approval','cancelled')),
+    check (status in (
+      'planned','executing','completed','failed','awaiting_approval','cancelled',
+      'waiting_data','waiting_user','blocked_tool','skipped'
+    )),
   project_id uuid,
   target_agent_key text references public.agent_definitions(agent_key),
   arguments jsonb not null default '{}'::jsonb,
