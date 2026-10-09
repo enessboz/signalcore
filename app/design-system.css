@@ -1872,3 +1872,1080 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* SignalCore Rank Tracker Workspace v2 */
+.rankTrackerPage {
+  padding-bottom: 64px;
+}
+
+.rankWorkspace {
+  display: grid;
+  gap: 14px;
+}
+
+.rankWorkspaceHero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 2px 6px;
+}
+
+.rankWorkspaceHero h1 {
+  margin: 2px 0 7px;
+  font-size: clamp(30px, 3vw, 40px);
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+
+.rankWorkspaceHero > div:first-child > p:last-child {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.rankWorkspaceHeroActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rankWorkspaceHeroActions form {
+  margin: 0;
+}
+
+.rankWorkspaceDataBadge {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #657184;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.rankWorkspaceNav {
+  position: sticky;
+  top: 66px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 22px rgba(31,41,60,.04);
+}
+
+.rankWorkspaceNav button {
+  min-width: max-content;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #748096;
+  padding: 0 11px;
+  font-size: 10px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.rankWorkspaceNav button:hover {
+  background: #f5f6f9;
+  color: #3e4859;
+}
+
+.rankWorkspaceNav button.active {
+  background: #171d2a;
+  color: #fff;
+}
+
+.rankWorkspaceNav button span {
+  min-width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff0f0;
+  color: #c74e4e;
+  font-size: 8px;
+}
+
+.rankWorkspaceKpis {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(110px, 1fr));
+  gap: 9px;
+}
+
+.rankWorkspaceKpis article {
+  min-width: 0;
+  padding: 13px 13px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(26,35,55,.035);
+}
+
+.rankWorkspaceKpis article > span {
+  display: block;
+  min-height: 23px;
+  color: #8993a5;
+  font-size: 8px;
+  font-weight: 780;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.rankWorkspaceKpis article > strong {
+  display: block;
+  margin-top: 4px;
+  color: #1d2534;
+  font-size: 22px;
+  line-height: 1.05;
+  letter-spacing: -.04em;
+}
+
+.rankWorkspaceKpis article > small {
+  display: block;
+  margin-top: 5px;
+  color: #9099a9;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.rankGood { color: #16815b !important; }
+.rankBad { color: #ca4f4f !important; }
+
+.rankWorkspaceOverviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, .8fr);
+  gap: 12px;
+}
+
+.rankWorkspaceChartPanel {
+  min-height: 340px;
+}
+
+.rankChartLegend {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #778195;
+  font-size: 9px;
+}
+
+.rankChartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rankChartLegend i {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.rankLegendPurple { background: #665ce9; }
+.rankLegendGreen { background: #2da371; }
+
+.rankTrendChart {
+  position: relative;
+  min-height: 280px;
+  padding: 16px 16px 34px 44px;
+  overflow: hidden;
+}
+
+.rankTrendChart svg {
+  position: absolute;
+  inset: 16px 16px 34px 44px;
+  width: calc(100% - 60px);
+  height: calc(100% - 50px);
+  overflow: visible;
+}
+
+.rankChartGrid {
+  position: absolute;
+  inset: 20px 16px 38px 44px;
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  pointer-events: none;
+}
+
+.rankChartGrid span {
+  border-top: 1px dashed #e7eaf1;
+}
+
+.rankTrendLabels {
+  position: absolute;
+  left: 44px;
+  right: 16px;
+  bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  color: #9ca5b4;
+  font-size: 8px;
+}
+
+.rankEmptyChart {
+  min-height: 230px;
+  display: grid;
+  place-items: center;
+  color: #99a2b2;
+  font-size: 10px;
+}
+
+.rankDistribution {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.rankDistributionRow {
+  display: grid;
+  grid-template-columns: 58px minmax(0,1fr) 30px;
+  align-items: center;
+  gap: 9px;
+}
+
+.rankDistributionRow strong,
+.rankDistributionRow b {
+  font-size: 10px;
+}
+
+.rankDistributionBar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf0f5;
+}
+
+.rankDistributionBar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.rankDistributionBar.purple span { background: linear-gradient(90deg,#6358e8,#857cf4); }
+.rankDistributionBar.green span { background: #35ad79; }
+.rankDistributionBar.blue span { background: #5b8edb; }
+.rankDistributionBar.amber span { background: #dfa044; }
+.rankDistributionBar.gray span { background: #aab2c0; }
+
+.rankDistributionMini {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.rankDistributionMini div {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.rankDistributionMini b {
+  display: block;
+  font-size: 16px;
+}
+
+.rankDistributionMini span {
+  color: #8993a5;
+  font-size: 8px;
+}
+
+.rankCountryPanel,
+.rankSegmentPanel {
+  overflow: visible;
+}
+
+.rankCountryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 9px;
+  padding: 14px;
+}
+
+.rankCountryGridWide {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.rankCountryCard {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.rankCountryCard:hover {
+  transform: translateY(-1px);
+  border-color: #d2cef9;
+  box-shadow: 0 8px 18px rgba(42,51,75,.05);
+}
+
+.rankCountryCard > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.rankCountryFlag {
+  font-size: 18px;
+}
+
+.rankCountryCard strong {
+  font-size: 10px;
+}
+
+.rankCountryCard > b {
+  margin-top: 4px;
+  font-size: 20px;
+  letter-spacing: -.04em;
+}
+
+.rankCountryCard > small {
+  color: #8993a5;
+  font-size: 8px;
+}
+
+.rankCountryMiniStats {
+  display: grid !important;
+  grid-template-columns: repeat(2,1fr);
+  gap: 6px !important;
+  margin-top: 6px;
+}
+
+.rankCountryMiniStats span {
+  padding: 6px;
+  border-radius: 7px;
+  background: #f7f8fa;
+  color: #7f8999;
+  font-size: 8px;
+}
+
+.rankCountryMiniStats b {
+  font-size: 9px;
+  color: #3d4553;
+}
+
+.rankSegmentGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(190px,1fr));
+  gap: 9px;
+  padding: 14px;
+}
+
+.rankSegmentGridWide {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.rankSegmentCard {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+
+.rankSegmentCard:hover {
+  border-color: #d4cffc;
+  background: #fcfbff;
+  transform: translateY(-1px);
+}
+
+.rankSegmentCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  color: #8b95a5;
+  font-size: 8px;
+}
+
+.rankSegmentType {
+  display: inline-flex;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #efedff;
+  color: #574dca;
+  font-weight: 750;
+}
+
+.rankSegmentCard > strong {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.rankSegmentStats {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 6px;
+}
+
+.rankSegmentStats > div {
+  min-width: 0;
+  padding: 7px;
+  border-radius: 7px;
+  background: #f7f8fa;
+}
+
+.rankSegmentStats b {
+  display: block;
+  overflow: hidden;
+  color: #384151;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankSegmentStats span {
+  display: block;
+  margin-top: 2px;
+  color: #929baa;
+  font-size: 7px;
+}
+
+.rankTag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  font-size: 7.5px;
+  font-weight: 740;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rankTag-purple { background: #efedff; color: #554bc6; }
+.rankTag-green { background: #eaf8f1; color: #147854; }
+.rankTag-blue { background: #edf5ff; color: #2f70bf; }
+.rankTag-amber { background: #fff7e8; color: #9e6b16; }
+.rankTag-red { background: #fff0f0; color: #b94747; }
+.rankTag-gray { background: #f1f3f5; color: #667080; }
+
+.rankFilterPanel {
+  overflow: visible;
+}
+
+.rankFilters {
+  display: grid;
+  grid-template-columns: minmax(240px,1.7fr) repeat(4,minmax(130px,.8fr)) auto;
+  gap: 8px;
+  padding: 11px;
+}
+
+.rankFilters input,
+.rankFilters select {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: #303949;
+  padding: 0 10px;
+  font-size: 10px;
+  outline: none;
+}
+
+.rankFilters input:focus,
+.rankFilters select:focus {
+  border-color: #afa9f7;
+  box-shadow: 0 0 0 3px rgba(102,92,233,.07);
+}
+
+.rankSearch {
+  padding-left: 12px !important;
+}
+
+.rankKeywordTablePanel {
+  overflow: hidden;
+}
+
+.rankKeywordTableHeader {
+  align-items: center;
+}
+
+.rankTableHeaderActions {
+  display: flex;
+  gap: 6px;
+}
+
+.rankQuickFilters {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.rankQuickFilters button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #748095;
+  padding: 0 9px;
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rankQuickFilters button.active {
+  border-color: #d7d2ff;
+  background: #efedff;
+  color: #554bc7;
+}
+
+.rankBulkBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 13px;
+  border-bottom: 1px solid #ddd9ff;
+  background: #f7f5ff;
+}
+
+.rankBulkBar > strong {
+  color: #554bc7;
+  font-size: 9px;
+}
+
+.rankBulkBar form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rankBulkBar select {
+  height: 32px;
+  min-width: 160px;
+  border: 1px solid #d7d2ff;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.rankTableWrap {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.rankProfessionalTable {
+  width: 100%;
+  min-width: 1280px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.rankProfessionalTable th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 36px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--line);
+  background: #fafbfc;
+  color: #858fa0;
+  text-align: left;
+  font-size: 7.5px;
+  font-weight: 780;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rankProfessionalTable td {
+  padding: 10px 9px;
+  border-bottom: 1px solid #edf0f4;
+  color: #495365;
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+.rankProfessionalTable tbody tr:hover {
+  background: #fbfcff;
+}
+
+.rankKeywordIdentity {
+  min-width: 230px;
+}
+
+.rankKeywordIdentity strong {
+  display: block;
+  color: #273143;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.rankKeywordIdentity span {
+  display: block;
+  max-width: 260px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #9099aa;
+  font-size: 8px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankTagList {
+  min-width: 150px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.rankLocationCell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.rankLocationCell > span {
+  font-size: 15px;
+}
+
+.rankLocationCell strong,
+.rankLocationCell small {
+  display: block;
+}
+
+.rankLocationCell strong { font-size: 9px; }
+.rankLocationCell small {
+  margin-top: 1px;
+  color: #929baa;
+  font-size: 7px;
+  text-transform: capitalize;
+}
+
+.rankPositionCell strong {
+  color: #252e3d;
+  font-size: 12px;
+}
+
+.rankDelta {
+  color: #929baa;
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.rankDeltaUp { color: #17825b; }
+.rankDeltaDown { color: #c45151; }
+
+.rankStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f1f3f5;
+  color: #667181;
+  font-size: 7px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.rankStatusGood {
+  background: #eaf8f1;
+  color: #147954;
+}
+
+.rankStatusBad {
+  background: #fff0f0;
+  color: #b74a4a;
+}
+
+.rankRowAction {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #636d7d;
+  cursor: pointer;
+}
+
+.rankRowAction:hover {
+  border-color: #cbc5ff;
+  color: #554bc7;
+}
+
+.rankTableEmpty {
+  min-height: 220px;
+}
+
+.rankLandingList,
+.rankCompetitorList,
+.rankAlertList {
+  display: grid;
+  padding: 4px 14px 14px;
+}
+
+.rankLandingList article {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.6fr) repeat(4,minmax(90px,.5fr));
+  gap: 10px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.rankLandingIdentity {
+  min-width: 0;
+}
+
+.rankLandingIdentity strong {
+  display: block;
+  overflow: hidden;
+  color: #303949;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankLandingIdentity span {
+  display: block;
+  margin-top: 3px;
+  color: #919aaa;
+  font-size: 8px;
+}
+
+.rankLandingList article > div:not(.rankLandingIdentity) b,
+.rankLandingList article > div:not(.rankLandingIdentity) span {
+  display: block;
+}
+
+.rankLandingList article > div:not(.rankLandingIdentity) b {
+  font-size: 11px;
+}
+
+.rankLandingList article > div:not(.rankLandingIdentity) span {
+  margin-top: 2px;
+  color: #929baa;
+  font-size: 7px;
+}
+
+.rankCompetitorList article {
+  display: grid;
+  grid-template-columns: 30px minmax(150px,1fr) 110px 110px;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.rankCompetitorList article > span {
+  color: #979faf;
+  font-size: 8px;
+}
+
+.rankCompetitorList strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.rankCompetitorList article > div b,
+.rankCompetitorList article > div small {
+  display: block;
+}
+
+.rankCompetitorList article > div b { font-size: 10px; }
+.rankCompetitorList article > div small {
+  margin-top: 2px;
+  color: #929baa;
+  font-size: 7px;
+}
+
+.rankFeatureGrid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 7px;
+  padding: 14px;
+}
+
+.rankFeatureGrid > div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fafbfc;
+}
+
+.rankFeatureGrid strong,
+.rankFeatureGrid span {
+  display: block;
+}
+
+.rankFeatureGrid strong {
+  font-size: 9px;
+}
+
+.rankFeatureGrid span {
+  margin-top: 3px;
+  color: #929baa;
+  font-size: 7px;
+}
+
+.rankAlertList article {
+  display: grid;
+  grid-template-columns: minmax(220px,1fr) 120px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.rankAlertList article > div:first-child strong,
+.rankAlertList article > div:first-child span,
+.rankAlertList article > div:nth-child(2) b,
+.rankAlertList article > div:nth-child(2) span {
+  display: block;
+}
+
+.rankAlertList article > div:first-child strong { font-size: 10px; }
+.rankAlertList article > div:first-child span {
+  max-width: 650px;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #929baa;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankAlertList article > div:nth-child(2) b { font-size: 10px; }
+.rankAlertList article > div:nth-child(2) span {
+  margin-top: 2px;
+  font-size: 8px;
+}
+
+.rankSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}
+
+.rankModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(11,17,27,.42);
+  backdrop-filter: blur(3px);
+}
+
+.rankTagModal {
+  width: min(650px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid #e3e6ed;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(11,17,27,.22);
+}
+
+.rankTagModalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rankTagModalHead h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.rankTagModalHead p {
+  margin: 3px 0 0;
+  color: #8a94a5;
+  font-size: 9px;
+}
+
+.rankTagModalHead > button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #687384;
+  cursor: pointer;
+}
+
+.rankTagCreate {
+  display: grid;
+  grid-template-columns: 1fr 130px auto;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rankTagCreate input,
+.rankTagCreate select {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 9px;
+  font-size: 9px;
+}
+
+.rankTagManageList {
+  display: grid;
+  padding: 4px 16px 16px;
+}
+
+.rankTagManageList > div:not(.emptyState) {
+  display: grid;
+  grid-template-columns: 1fr 100px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.rankTagManageList small {
+  color: #929baa;
+  font-size: 8px;
+}
+
+@media (max-width: 1350px) {
+  .rankWorkspaceKpis {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .rankFilters {
+    grid-template-columns: minmax(220px,1fr) repeat(3,minmax(120px,.6fr));
+  }
+
+  .rankFilters .secondaryButton {
+    grid-column: auto;
+  }
+
+  .rankCountryGrid,
+  .rankSegmentGrid {
+    grid-template-columns: repeat(2,minmax(180px,1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .rankWorkspaceHero {
+    flex-direction: column;
+  }
+
+  .rankWorkspaceHeroActions {
+    justify-content: flex-start;
+  }
+
+  .rankWorkspaceNav {
+    top: 58px;
+  }
+
+  .rankWorkspaceOverviewGrid,
+  .rankSettingsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .rankFilters {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+  .rankSearch {
+    grid-column: 1 / -1;
+  }
+
+  .rankLandingList article {
+    grid-template-columns: minmax(220px,1fr) repeat(2,minmax(80px,.5fr));
+  }
+
+  .rankLandingList article > div:nth-child(4),
+  .rankLandingList article > div:nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .rankWorkspaceKpis {
+    grid-template-columns: repeat(2,1fr);
+  }
+
+  .rankCountryGrid,
+  .rankSegmentGrid,
+  .rankFilters,
+  .rankTagCreate {
+    grid-template-columns: 1fr;
+  }
+
+  .rankBulkBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rankBulkBar form {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rankBulkBar select {
+    width: 100%;
+  }
+
+  .rankCompetitorList article {
+    grid-template-columns: 28px minmax(120px,1fr) 90px;
+  }
+
+  .rankCompetitorList article > div:last-child {
+    display: none;
+  }
+
+  .rankAlertList article {
+    grid-template-columns: 1fr auto;
+  }
+
+  .rankAlertList article > div:nth-child(2) {
+    display: none;
+  }
+}
