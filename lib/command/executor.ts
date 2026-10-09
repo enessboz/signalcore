@@ -57,12 +57,13 @@ async function resolveProject(
   ownerId: string,
   projectRef: string | null,
   createdProjects: Map<string, string>,
+  client?: SupabaseClient,
 ) {
   if (!projectRef) return null;
   const normalized = projectRef.trim().toLowerCase();
   if (createdProjects.has(normalized)) return createdProjects.get(normalized)!;
 
-  const supabase = await createClient();
+  const supabase = client || (await createClient());
   const { data: direct } = await supabase
     .from("projects")
     .select("id,name,domain")
@@ -243,8 +244,9 @@ export async function executeChiefActions(input: {
   ownerId: string;
   actions: ChiefPlan["actions"];
   stopOnFailure?: boolean;
+  client?: SupabaseClient;
 }) {
-  const supabase = await createClient();
+  const supabase = input.client || (await createClient());
   const results: CommandActionResult[] = [];
   const createdProjects = new Map<string, string>();
 
@@ -625,6 +627,7 @@ export async function executeChiefActions(input: {
         input.ownerId,
         action.project_ref,
         createdProjects,
+        supabase,
       );
 
       if (
