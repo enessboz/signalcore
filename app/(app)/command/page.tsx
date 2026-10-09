@@ -26,6 +26,7 @@ export default async function CommandPage({
     { data: selectedMessages },
     { data: schedules },
     { data: recentActions },
+    { data: selectedPlans },
   ] = await Promise.all([
     supabase
       .from("command_threads")
@@ -51,7 +52,24 @@ export default async function CommandPage({
       .select("id,action_type,status,target_agent_key,project_id,created_at,result")
       .order("created_at", { ascending: false })
       .limit(10),
+    selectedThreadId
+      ? supabase
+          .from("command_plans")
+          .select("id,title,objective,status,current_step,total_steps,last_error,created_at,updated_at")
+          .eq("thread_id", selectedThreadId)
+          .order("created_at", { ascending: false })
+          .limit(3)
+      : Promise.resolve({ data: [] }),
   ]);
+
+  const latestPlan = selectedPlans?.[0] || null;
+  const { data: planSteps } = latestPlan
+    ? await supabase
+        .from("command_plan_steps")
+        .select("id,sequence,title,action_type,status,blocker_type,blocker_message,result,updated_at")
+        .eq("plan_id", latestPlan.id)
+        .order("sequence")
+    : { data: [] };
 
   const apiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
@@ -199,6 +217,96 @@ export default async function CommandPage({
               </div>
             </form>
           </section>
+
+          {latestPlan ? (
+            <section className="panel commandPlanPanel">
+              <div className="panelHeader">
+                <div>
+                  <h2>{tr ? "Aktif iş planı" : "Current work plan"}</h2>
+                  <p>{latestPlan.title}</p>
+                </div>
+                <span className={"commandPlanState commandPlanState-" + latestPlan.status}>
+                  {latestPlan.status.replaceAll("_", " ")}
+                </span>
+              </div>
+
+              <div className="commandPlanProgress">
+                <div>
+                  <strong>
+                    {Math.min(
+                      (planSteps || []).filter((step) =>
+                        ["completed", "skipped"].includes(step.status),
+                      ).length,
+                      latestPlan.total_steps,
+                    )}
+                    /{latestPlan.total_steps}
+                  </strong>
+                  <span>{tr ? "step tamamlandı" : "steps completed"}</span>
+                </div>
+                <div className="commandPlanBar">
+                  <span
+                    style={{
+                      width:
+                        (latestPlan.total_steps
+                          ? ((planSteps || []).filter((step) =>
+                              ["completed", "skipped"].includes(step.status),
+                            ).length /
+                            latestPlan.total_steps) *
+                            100
+                          : 0) + "%",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="commandPlanSteps">
+                {(planSteps || []).map((step) => (
+                  <div
+                    className={"commandPlanStep commandPlanStep-" + step.status}
+                    key={step.id}
+                  >
+                    <div className="commandPlanStepIndex">
+                      {["completed", "skipped"].includes(step.status)
+                        ? "✓"
+                        : step.sequence}
+                    </div>
+                    <div className="commandPlanStepCopy">
+                      <div>
+                        <strong>{step.title}</strong>
+                        <span>{step.status.replaceAll("_", " ")}</span>
+                      </div>
+                      {step.blocker_message ? (
+                        <p>{step.blocker_message}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {latestPlan.last_error ? (
+                <div className="commandPlanBlocker">
+                  <strong>
+                    {latestPlan.status === "waiting_user"
+                      ? tr
+                        ? "Senden bilgi bekliyor"
+                        : "Waiting for your input"
+                      : latestPlan.status === "waiting_data"
+                        ? tr
+                          ? "Veri hazırlanıyor"
+                          : "Preparing required data"
+                        : latestPlan.status === "blocked_tool"
+                          ? tr
+                            ? "Tool problemi"
+                            : "Tool dependency"
+                          : tr
+                            ? "Plan durdu"
+                            : "Plan stopped"}
+                  </strong>
+                  <span>{latestPlan.last_error}</span>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="panelHeader">
