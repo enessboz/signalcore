@@ -332,28 +332,11 @@ export async function sendChiefCommand(formData: FormData) {
         : null;
 
     let execution:
+      | Awaited<ReturnType<typeof createAndExecuteCommandPlan>>
       | {
-          planId: string | null;
-          status:
-            | "completed"
-            | "waiting_user"
-            | "waiting_data"
-            | "blocked_tool"
-            | "failed";
-          results: Array<{
-            type: string;
-            status:
-              | "completed"
-              | "failed"
-              | "skipped"
-              | "waiting_data"
-              | "waiting_user"
-              | "blocked_tool";
-            summary: string;
-            projectId?: string | null;
-            targetAgentKey?: string | null;
-            data?: Record<string, unknown>;
-          }>;
+          planId: string;
+          status: "waiting_user";
+          results: [];
         };
 
     if (result.plan.needs_clarification) {
