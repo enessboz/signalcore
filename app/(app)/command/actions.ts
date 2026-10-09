@@ -3,7 +3,11 @@
 import { redirect } from "next/navigation";
 import { estimateModelCost } from "@/lib/agents/openai";
 import { planChiefOperatorCommand } from "@/lib/command/chief";
-import { createAndExecuteCommandPlan } from "@/lib/command/plan-engine";
+import {
+  createAndExecuteCommandPlan,
+  createWaitingUserCommandPlan,
+  resolveWaitingUserCommandPlan,
+} from "@/lib/command/plan-engine";
 import { createClient } from "@/lib/supabase/server";
 
 function textValue(formData: FormData, key: string) {
@@ -321,29 +325,86 @@ export async function sendChiefCommand(formData: FormData) {
     const model =
       process.env.OPENAI_ROUTINE_MODEL || chief.default_model || "gpt-6-luna";
 
-    const execution = result.plan.needs_clarification
-      ? {
-          planId: null,
-          status: "completed" as const,
-          results: [],
-        }
-      : await createAndExecuteCommandPlan({
+    const priorWaitingUserPlan =
+      activeWorkPlans.length === 1 &&
+      activeWorkPlans[0]?.status === "waiting_user"
+        ? activeWorkPlans[0]
+        : null;
+
+    let execution:
+      | {
+          planId: string | null;
+          status:
+            | "completed"
+            | "waiting_user"
+            | "waiting_data"
+            | "blocked_tool"
+            | "failed";
+          results: Array<{
+            type: string;
+            status:
+              | "completed"
+              | "failed"
+              | "skipped"
+              | "waiting_data"
+              | "waiting_user"
+              | "blocked_tool";
+            summary: string;
+            projectId?: string | null;
+            targetAgentKey?: string | null;
+            data?: Record<string, unknown>;
+          }>;
+        };
+
+    if (result.plan.needs_clarification) {
+      const waiting = await createWaitingUserCommandPlan({
+        client: supabase,
+        ownerId,
+        threadId,
+        sourceMessageId: userMessage.id,
+        objective: message,
+        question:
+          result.plan.clarification_question ||
+          "I need one detail before I can continue.",
+        model,
+        usage: result.usage,
+        existingPlanId: priorWaitingUserPlan?.id || null,
+      });
+
+      execution = {
+        planId: waiting.planId,
+        status: "waiting_user",
+        results: [],
+      };
+    } else {
+      if (priorWaitingUserPlan?.id) {
+        await resolveWaitingUserCommandPlan({
           client: supabase,
           ownerId,
-          threadId,
-          sourceMessageId: userMessage.id,
-          objective: message,
-          model,
-          usage: result.usage,
-          actions: result.plan.actions,
-          continuationOf:
-            activeWorkPlans.length === 1 &&
-            ["waiting_user", "blocked_tool", "waiting_data"].includes(
-              activeWorkPlans[0].status,
-            )
-              ? activeWorkPlans[0].id
-              : null,
+          planId: priorWaitingUserPlan.id,
+          userInput: message,
         });
+      }
+
+      execution = await createAndExecuteCommandPlan({
+        client: supabase,
+        ownerId,
+        threadId,
+        sourceMessageId: userMessage.id,
+        objective: message,
+        model,
+        usage: result.usage,
+        actions: result.plan.actions,
+        continuationOf:
+          priorWaitingUserPlan?.id ||
+          (activeWorkPlans.length === 1 &&
+          ["blocked_tool", "waiting_data"].includes(
+            activeWorkPlans[0]?.status || "",
+          )
+            ? activeWorkPlans[0]!.id
+            : null),
+      });
+    }
 
     const actionResults = execution.results;
 
