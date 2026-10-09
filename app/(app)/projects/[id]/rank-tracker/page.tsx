@@ -178,14 +178,26 @@ export default async function RankTrackerPage({
     memberIdsByGroup.set(member.group_id, set);
   }
 
-  const visibleKeywords = selectedGroupId
-    ? enriched.filter((item) =>
-        memberIdsByGroup.get(selectedGroupId)?.has(item.id),
-      )
-    : enriched;
-
   const selectedGroup =
     (keywordGroups || []).find((group) => group.id === selectedGroupId) || null;
+
+  const selectedMembershipByKeyword = new Map(
+    (groupMembers || [])
+      .filter((member) => member.group_id === selectedGroupId)
+      .map((member) => [member.tracked_keyword_id, member] as const),
+  );
+
+  const visibleKeywords = selectedGroupId
+    ? enriched
+        .filter((item) =>
+          memberIdsByGroup.get(selectedGroupId)?.has(item.id),
+        )
+        .sort(
+          (a, b) =>
+            Number(selectedMembershipByKeyword.get(a.id)?.rank_order || 9999) -
+            Number(selectedMembershipByKeyword.get(b.id)?.rank_order || 9999),
+        )
+    : enriched;
 
   const activeKeywords = enriched.filter((item) => item.active);
   const top10 = activeKeywords.filter(
@@ -620,6 +632,31 @@ export default async function RankTrackerPage({
                       {keyword.location_code}
                     </p>
                     <h3>{keyword.keyword}</h3>
+                    {selectedGroup ? (() => {
+                      const membership = selectedMembershipByKeyword.get(keyword.id);
+                      if (!membership) return null;
+                      const primaryLabel =
+                        selectedGroup.metric === "impressions"
+                          ? "impressions"
+                          : "clicks";
+                      const secondaryLabel =
+                        selectedGroup.metric === "impressions"
+                          ? "clicks"
+                          : "impressions";
+                      return (
+                        <div className="rankGroupSourceMetric">
+                          <strong>#{membership.rank_order}</strong>
+                          <span>
+                            {Number(membership.metric_value).toLocaleString("en-US")}{" "}
+                            {primaryLabel}
+                          </span>
+                          <small>
+                            {Number(membership.secondary_metric_value).toLocaleString("en-US")}{" "}
+                            {secondaryLabel}
+                          </small>
+                        </div>
+                      );
+                    })() : null}
                   </div>
                   <div className="rankPositionBlock">
                     <strong>{formatPosition(keyword.last_position)}</strong>
