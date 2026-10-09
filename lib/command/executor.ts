@@ -651,6 +651,7 @@ export async function executeChiefActions(input: {
           "configure_rank_tracking",
           "add_tracked_keywords",
           "seed_rank_from_gsc",
+          "create_rank_groups_from_gsc",
           "run_rank_tracking",
           "configure_opportunity_engine",
           "run_opportunity_scan",
