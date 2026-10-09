@@ -85,3 +85,11 @@ using (owner_id=(select auth.uid()))
 with check (owner_id=(select auth.uid()));
 
 
+
+
+create index if not exists command_plans_continuation_fk_idx
+  on public.command_plans(continuation_of);
+create index if not exists command_plans_project_owner_fk_idx
+  on public.command_plans(project_id,owner_id);
+create index if not exists command_plans_source_message_fk_idx
+  on public.command_plans(source_message_id);
