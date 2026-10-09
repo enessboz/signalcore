@@ -23,6 +23,8 @@ type ChiefAction = {
     | "add_tracked_keywords"
     | "seed_rank_from_gsc"
     | "create_rank_groups_from_gsc"
+    | "analyze_gsc_live"
+    | "add_gsc_page_queries_to_rank_tracker"
     | "run_rank_tracking"
     | "configure_opportunity_engine"
     | "run_opportunity_scan"
@@ -98,6 +100,12 @@ type ChiefAction = {
   rank_group_metrics: Array<"clicks" | "impressions">;
   rank_group_auto_refresh: boolean | null;
   rank_group_refresh_cadence: "daily" | "weekly" | null;
+  gsc_analysis_dimension: "queries" | "pages" | null;
+  gsc_metric: "clicks" | "impressions" | null;
+  gsc_limit: number | null;
+  gsc_page_contains: string | null;
+  gsc_page_limit: number | null;
+  gsc_keywords_per_page: number | null;
   rank_priority: "high" | "normal" | "low" | null;
   rank_cadence: "daily" | "weekly" | "monthly" | null;
   rank_device: "desktop" | "mobile" | null;
@@ -230,6 +238,12 @@ const actionSchema = {
     "rank_group_metrics",
     "rank_group_auto_refresh",
     "rank_group_refresh_cadence",
+    "gsc_analysis_dimension",
+    "gsc_metric",
+    "gsc_limit",
+    "gsc_page_contains",
+    "gsc_page_limit",
+    "gsc_keywords_per_page",
     "rank_priority",
     "rank_cadence",
     "rank_device",
@@ -281,6 +295,8 @@ const actionSchema = {
         "add_tracked_keywords",
         "seed_rank_from_gsc",
         "create_rank_groups_from_gsc",
+        "analyze_gsc_live",
+        "add_gsc_page_queries_to_rank_tracker",
         "run_rank_tracking",
         "configure_opportunity_engine",
         "run_opportunity_scan",
@@ -417,6 +433,30 @@ const actionSchema = {
       type: ["string", "null"],
       enum: ["daily", "weekly", null],
     },
+    gsc_analysis_dimension: {
+      type: ["string", "null"],
+      enum: ["queries", "pages", null],
+    },
+    gsc_metric: {
+      type: ["string", "null"],
+      enum: ["clicks", "impressions", null],
+    },
+    gsc_limit: {
+      type: ["integer", "null"],
+      minimum: 1,
+      maximum: 100,
+    },
+    gsc_page_contains: { type: ["string", "null"] },
+    gsc_page_limit: {
+      type: ["integer", "null"],
+      minimum: 1,
+      maximum: 30,
+    },
+    gsc_keywords_per_page: {
+      type: ["integer", "null"],
+      minimum: 1,
+      maximum: 100,
+    },
     rank_priority: {
       type: ["string", "null"],
       enum: ["high", "normal", "low", null],
@@ -543,7 +583,7 @@ export async function planChiefOperatorCommand(input: {
           content: [
             {
               type: "input_text",
-              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180/480-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. You may configure project Rank Tracking, add explicit tracked keywords, seed a cost-controlled keyword universe from the GSC warehouse, create separate dynamic GSC Rank Tracker groups from top-click and/or top-impression queries for an explicit performance window, and run rank checks. When the user asks for top GSC queries by clicks or impressions and wants them added to Rank Tracker, prefer create_rank_groups_from_gsc over generic seed_rank_from_gsc. Preserve the requested groups separately even when the same keyword belongs to both. Use performance_window_days for requests such as 28 days, 30 days, or 90 days; rank_group_limit defaults to 20 when the user says top 20. Set rank_group_auto_refresh=true when the user expects the lists to stay updated in the background. Give every executable action a concise step_title so SignalCore can persist a visible work list. Treat workspaceContext.active_work_plans as authoritative execution memory. If a prior plan is waiting or partially complete, NEVER repeat steps whose status is completed or skipped. Resolve only the current blocker and plan only the still-unfinished work. If a tool or first-party dataset is temporarily unavailable but SignalCore has an internal action that can prepare it, do not ask the user to perform the tool work manually: plan that internal action and allow the executor to pause/resume at the dependency. Ask a clarification question only when genuinely missing user intent or a value that cannot be safely derived from connected project context. Do not ask the user to identify an existing project if it can be uniquely resolved by its name or domain from workspace context. Rank checks are paid SERP operations and must remain subject to project SERP budget hard stops. You may configure or manually run the deterministic Opportunity Engine over GSC/GA4/rank evidence. You may record an explicitly described SEO intervention and create D+7/D+14/D+28 monitoring checkpoints. Only use intervention URLs, queries, dates, notes and hypotheses the user actually supplied or that are unambiguous from the current request; do not invent change details. For evaluate_seo_intervention, resolve an existing intervention by title/id and use checkpoint_days 7, 14 or 28. Intervention evaluation is an internal first-party measurement action and must describe post-change association, never causality. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
+              text: `CURRENT TIME: ${new Date().toISOString()}\nDEFAULT TIMEZONE: Europe/Istanbul\n\nWORKSPACE CONTEXT:\n${input.workspaceContext}\n\nRECENT CONVERSATION:\n${conversationText || "(none)"}\n\nNEW USER MESSAGE:\n${input.userMessage}\n\nYou may also safely add organization rules to Global Brain, add explicitly user-supplied background to a Project Brain, assign an existing output profile to a project, configure project AI/SERP/browser monthly budgets, and manage the internal Sales lead pipeline. For Sales discovery, create campaigns only from user-provided or clearly requested ICP queries. Discovery and qualification are internal/public-data operations; never send outreach automatically. A sales lead can be converted to a Lead Prospect project, audited with public data, and turned into a strict-profile sales deck. When the user explicitly says a Lead Prospect is won/onboarded, you may convert that existing project to Client without creating a new project. Do not infer background text the user did not provide. For first-party data operations, you may safely toggle project-level GSC/GA4 auto sync or queue 30/90/180/480-day backfills only when the referenced project already has the corresponding property bound. For deterministic technical crawling, you may create or manage daily/weekly/monthly crawl schedules without invoking an AI model. You may configure project Rank Tracking, add explicit tracked keywords, seed a cost-controlled keyword universe from the GSC warehouse, create separate dynamic GSC Rank Tracker groups from top-click and/or top-impression queries for an explicit performance window, and run rank checks. When the user asks for top GSC queries by clicks or impressions and wants them added to Rank Tracker, prefer create_rank_groups_from_gsc over generic seed_rank_from_gsc. Live GSC is a first-class internal tool: do NOT wait for the warehouse to be fully backfilled when the connected Search Console API can answer the requested range directly. For deterministic GSC questions such as top pages or top queries, use analyze_gsc_live instead of delegating to another agent. For requests like "find my top English pages and add the queries from those pages to Rank Tracker", use add_gsc_page_queries_to_rank_tracker; set gsc_page_contains to the clear URL-language path such as "/en/" when the project URL structure makes it unambiguous, set gsc_page_limit and gsc_keywords_per_page from the user's request or reasonable defaults, and do not delegate this deterministic data operation. Preserve the requested groups separately even when the same keyword belongs to both. Use performance_window_days for requests such as 28 days, 30 days, or 90 days; rank_group_limit defaults to 20 when the user says top 20. Set rank_group_auto_refresh=true when the user expects the lists to stay updated in the background. Give every executable action a concise step_title so SignalCore can persist a visible work list. Treat workspaceContext.active_work_plans as authoritative execution memory. If a prior plan is waiting or partially complete, NEVER repeat steps whose status is completed or skipped. Resolve only the current blocker and plan only the still-unfinished work. If a tool or first-party dataset is temporarily unavailable but SignalCore has an internal action that can prepare it, do not ask the user to perform the tool work manually: plan that internal action and allow the executor to pause/resume at the dependency. Ask a clarification question only when genuinely missing user intent or a value that cannot be safely derived from connected project context. Do not ask the user to identify an existing project if it can be uniquely resolved by its name or domain from workspace context. Rank checks are paid SERP operations and must remain subject to project SERP budget hard stops. You may configure or manually run the deterministic Opportunity Engine over GSC/GA4/rank evidence. You may record an explicitly described SEO intervention and create D+7/D+14/D+28 monitoring checkpoints. Only use intervention URLs, queries, dates, notes and hypotheses the user actually supplied or that are unambiguous from the current request; do not invent change details. For evaluate_seo_intervention, resolve an existing intervention by title/id and use checkpoint_days 7, 14 or 28. Intervention evaluation is an internal first-party measurement action and must describe post-change association, never causality. Use crawl_mode=http for a full raw HTTP crawl and crawl_mode=delta for change/regression monitoring. For scheduled agent work, if the user asks for a report only when something important is found, set follow_up_report=true, choose the requested report_format, and set minimum_importance (default high when the user says important/meaningful without a threshold). Return only safe internal actions. If the user asks for an external-impact action such as publishing, deploying, deleting data, sending outreach, modifying production CMS/code, or changing third-party systems, do not execute it as a direct action. Explain that it must go through an approval-required specialist.`,
             },
           ],
         },
