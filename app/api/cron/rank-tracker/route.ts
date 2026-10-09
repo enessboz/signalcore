@@ -9,6 +9,7 @@ import {
   type TrackedKeywordRow,
 } from "@/lib/seo/rank-tracking";
 import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
+import { refreshDueGscRankGroups } from "@/lib/seo/rank-groups";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -59,6 +60,10 @@ export async function POST(request: NextRequest) {
   }
 
   const recoveredStaleRuns = await recoverStaleRankRuns(supabase);
+  const groupRefreshResults = await refreshDueGscRankGroups({
+    client: supabase,
+    maxGroups: 10,
+  });
 
   const { data: autoSettings, error: settingsError } = await supabase
     .from("rank_tracking_settings")
@@ -210,6 +215,15 @@ export async function POST(request: NextRequest) {
     }),
     metrics: {
       recovered_stale_runs: recoveredStaleRuns,
+      rank_groups_refreshed: groupRefreshResults.filter(
+        (item) => item.status === "succeeded",
+      ).length,
+      rank_groups_waiting_data: groupRefreshResults.filter(
+        (item) => item.status === "waiting_data",
+      ).length,
+      rank_groups_failed: groupRefreshResults.filter(
+        (item) => item.status === "failed",
+      ).length,
       seed_projects: seedResults.length,
       active_keywords_checked: activeRows?.length || 0,
       due_keywords: due.length,
@@ -223,6 +237,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     recovered_stale_runs: recoveredStaleRuns,
+    rank_group_refresh_results: groupRefreshResults,
     seed_results: seedResults,
     active_keywords_checked: activeRows?.length || 0,
     due_keywords: due.length,
