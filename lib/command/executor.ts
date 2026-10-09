@@ -11,6 +11,7 @@ import { qualifyTopCampaignLeads } from "@/lib/sales/automation";
 import { auditSalesLeadProspect, convertSalesLeadToProspect, createSalesDeckForLead } from "@/lib/sales/prospect";
 import { convertLeadProspectProjectToClient } from "@/lib/projects/lifecycle";
 import { runRankTrackingBatch, seedTrackedKeywordsFromGsc } from "@/lib/seo/rank-tracking";
+import { syncGscRankGroups } from "@/lib/seo/rank-groups";
 import { detectWarehouseOpportunities } from "@/lib/rules/warehouse-opportunities";
 import { evaluateInterventionCheck } from "@/lib/interventions/evaluate";
 
@@ -231,7 +232,7 @@ function chunkBackground(input: string, maxChars = 1500) {
 
 export type CommandActionResult = {
   type: ChiefAction["type"];
-  status: "completed" | "failed" | "skipped";
+  status: "completed" | "failed" | "skipped" | "waiting_data" | "waiting_user" | "blocked_tool";
   projectId?: string | null;
   targetAgentKey?: string | null;
   summary: string;
@@ -241,6 +242,7 @@ export type CommandActionResult = {
 export async function executeChiefActions(input: {
   ownerId: string;
   actions: ChiefPlan["actions"];
+  stopOnFailure?: boolean;
 }) {
   const supabase = await createClient();
   const results: CommandActionResult[] = [];
@@ -1206,6 +1208,90 @@ export async function executeChiefActions(input: {
         continue;
       }
 
+      if (action.type === "create_rank_groups_from_gsc") {
+        const days = Math.min(
+          Math.max(Number(action.performance_window_days || 28), 1),
+          480,
+        );
+        const limit = Math.min(
+          Math.max(Number(action.rank_group_limit || 20), 1),
+          100,
+        );
+        const metrics =
+          action.rank_group_metrics?.length
+            ? action.rank_group_metrics
+            : (["clicks", "impressions"] as const);
+        const refreshCadence =
+          action.rank_group_refresh_cadence === "weekly" ? "weekly" : "daily";
+
+        const grouped = await syncGscRankGroups({
+          ownerId: input.ownerId,
+          projectId: projectId!,
+          days,
+          limit,
+          metrics: [...metrics],
+          autoRefresh: action.rank_group_auto_refresh !== false,
+          refreshCadence,
+          force: true,
+          client: supabase,
+        });
+
+        if (grouped.waitingData) {
+          const end = addIsoDays(new Date().toISOString().slice(0, 10), -2);
+          const start = addIsoDays(end, -(days + 7));
+          const syncJobId = await enqueueGoogleSync({
+            ownerId: input.ownerId,
+            projectId: projectId!,
+            source: "gsc",
+            startDate: start,
+            endDate: end,
+            mode: "repair",
+            priority: 95,
+            client: supabase,
+          });
+
+          results.push({
+            type: action.type,
+            status: "waiting_data",
+            projectId,
+            summary:
+              "GSC warehouse is not ready for the requested " +
+              String(days) +
+              "-day window. A high-priority GSC repair sync was queued. " +
+              "This step is paused until first-party data is available.",
+            data: {
+              sync_job_id: syncJobId,
+              requested_days: days,
+              group_limit: limit,
+              metrics,
+              groups: grouped.groups,
+            },
+          });
+          break;
+        }
+
+        results.push({
+          type: action.type,
+          status: "completed",
+          projectId,
+          summary:
+            "Created/refreshed " +
+            String(grouped.refreshedGroups) +
+            " GSC Rank Tracker group(s): " +
+            grouped.groups.map((group) => group.groupName).join(", ") +
+            ".",
+          data: {
+            requested_days: days,
+            group_limit: limit,
+            selected_keywords: grouped.selectedKeywords,
+            groups: grouped.groups,
+            auto_refresh: action.rank_group_auto_refresh !== false,
+            refresh_cadence: refreshCadence,
+          },
+        });
+        continue;
+      }
+
       if (action.type === "run_rank_tracking") {
         let keywordIds: string[] | undefined;
 
@@ -1990,6 +2076,7 @@ export async function executeChiefActions(input: {
         status: "failed",
         summary: error instanceof Error ? error.message : "Action failed.",
       });
+      if (input.stopOnFailure !== false) break;
     }
   }
 
