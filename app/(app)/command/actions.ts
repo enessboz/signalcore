@@ -15,6 +15,14 @@ function textValue(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isNextRedirectSignal(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const digest = "digest" in error
+    ? (error as { digest?: unknown }).digest
+    : null;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
 function commandContextNeeds(message: string) {
   const text = message.toLocaleLowerCase("tr-TR");
   const has = (pattern: RegExp) => pattern.test(text);
@@ -498,6 +506,10 @@ export async function sendChiefCommand(formData: FormData) {
 
     redirect(`/command?thread=${threadId}`);
   } catch (error) {
+    if (isNextRedirectSignal(error)) {
+      throw error;
+    }
+
     const errorMessage = error instanceof Error ? error.message : "Chief Operator failed.";
 
     await supabase.from("command_messages").insert({
