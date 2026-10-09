@@ -1677,3 +1677,87 @@ body {
   font-size: 9px;
   line-height: 1.5;
 }
+
+/* Rank Tracker keyword groups */
+.rankGroupsPanel {
+  background:
+    radial-gradient(circle at 90% 0%, rgba(100,92,255,.055), transparent 16rem),
+    #fff;
+}
+.rankGroupGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 10px;
+}
+.rankGroupCard {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fafbfc;
+  color: inherit;
+  transition:
+    border-color .16s ease,
+    background .16s ease,
+    box-shadow .16s ease,
+    transform .16s ease;
+}
+.rankGroupCard:hover {
+  border-color: #cfcaff;
+  background: #fbfaff;
+  box-shadow: 0 6px 20px rgba(77,67,203,.06);
+  transform: translateY(-1px);
+}
+.rankGroupCard.active {
+  border-color: #9d96ff;
+  background: #f5f3ff;
+  box-shadow: 0 0 0 3px rgba(100,92,255,.07);
+}
+.rankGroupCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.rankGroupCard > strong {
+  font-size: 13px;
+  line-height: 1.35;
+  letter-spacing: -.02em;
+}
+.rankGroupMetrics {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 7px;
+}
+.rankGroupMetrics > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid #e7e9ef;
+  border-radius: 8px;
+  background: #fff;
+}
+.rankGroupMetrics b {
+  color: #2c3342;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.rankGroupMetrics span {
+  color: #8a93a4;
+  font-size: 8px;
+}
+.rankGroupCard small {
+  color: #7d8697;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.rankGroupCard p {
+  margin: 0;
+  color: #aa4d4d;
+  font-size: 9px;
+  line-height: 1.45;
+}
