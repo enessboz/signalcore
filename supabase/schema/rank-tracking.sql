@@ -193,3 +193,10 @@ on public.rank_keyword_group_members
 for all to authenticated
 using (owner_id=(select auth.uid()))
 with check (owner_id=(select auth.uid()));
+
+
+alter table public.tracked_keywords
+  drop constraint if exists tracked_keywords_source_check;
+alter table public.tracked_keywords
+  add constraint tracked_keywords_source_check
+  check (source in ('manual','gsc_auto','gsc_group','agent'));
