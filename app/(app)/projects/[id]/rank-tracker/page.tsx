@@ -61,6 +61,7 @@ export default async function RankTrackerPage({
   const { id } = await params;
   const query = await searchParams;
   const selectedKeywordId = scalar(query.keyword);
+  const selectedGroupId = scalar(query.group);
   const supabase = await createClient();
 
   const [
@@ -71,6 +72,8 @@ export default async function RankTrackerPage({
     { data: runs },
     { data: gscState },
     { data: usage },
+    { data: keywordGroups },
+    { data: groupMembers },
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -119,6 +122,16 @@ export default async function RankTrackerPage({
           Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1),
         ).toISOString(),
       ),
+    supabase
+      .from("rank_keyword_groups")
+      .select("id,name,group_key,source,metric,window_days,keyword_limit,auto_refresh_enabled,refresh_cadence,last_refreshed_at,last_data_date,last_status,last_error,metadata")
+      .eq("project_id", id)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("rank_keyword_group_members")
+      .select("group_id,tracked_keyword_id,rank_order,metric_value,secondary_metric_value,source_snapshot")
+      .eq("project_id", id)
+      .order("rank_order", { ascending: true }),
   ]);
 
   if (!project) notFound();
@@ -157,6 +170,22 @@ export default async function RankTrackerPage({
       movement: movement(latest?.position, previous?.position),
     };
   });
+
+  const memberIdsByGroup = new Map<string, Set<string>>();
+  for (const member of groupMembers || []) {
+    const set = memberIdsByGroup.get(member.group_id) || new Set<string>();
+    set.add(member.tracked_keyword_id);
+    memberIdsByGroup.set(member.group_id, set);
+  }
+
+  const visibleKeywords = selectedGroupId
+    ? enriched.filter((item) =>
+        memberIdsByGroup.get(selectedGroupId)?.has(item.id),
+      )
+    : enriched;
+
+  const selectedGroup =
+    (keywordGroups || []).find((group) => group.id === selectedGroupId) || null;
 
   const activeKeywords = enriched.filter((item) => item.active);
   const top10 = activeKeywords.filter(
@@ -481,10 +510,86 @@ export default async function RankTrackerPage({
         </section>
       </div>
 
+      {(keywordGroups || []).length ? (
+        <section className="panel rankGroupsPanel">
+          <div className="panelHeader">
+            <div>
+              <h2>Keyword groups</h2>
+              <p>
+                Dynamic GSC groups stay separate even when the same keyword belongs
+                to more than one group.
+              </p>
+            </div>
+            {selectedGroup ? (
+              <Link className="ghostButton" href={"/projects/" + id + "/rank-tracker"}>
+                Show all keywords
+              </Link>
+            ) : null}
+          </div>
+          <div className="rankGroupGrid">
+            {(keywordGroups || []).map((group) => {
+              const count = memberIdsByGroup.get(group.id)?.size || 0;
+              return (
+                <Link
+                  key={group.id}
+                  href={"/projects/" + id + "/rank-tracker?group=" + group.id}
+                  className={
+                    selectedGroupId === group.id
+                      ? "rankGroupCard active"
+                      : "rankGroupCard"
+                  }
+                >
+                  <div className="rankGroupCardTop">
+                    <span className="sourceBadge">
+                      {group.metric || group.source.replaceAll("_", " ")}
+                    </span>
+                    <span
+                      className={
+                        group.last_status === "succeeded"
+                          ? "healthGood"
+                          : group.last_status === "failed"
+                            ? "healthBad"
+                            : ""
+                      }
+                    >
+                      {group.last_status}
+                    </span>
+                  </div>
+                  <strong>{group.name}</strong>
+                  <div className="rankGroupMetrics">
+                    <div>
+                      <b>{count}</b>
+                      <span>keywords</span>
+                    </div>
+                    <div>
+                      <b>{group.window_days}d</b>
+                      <span>GSC window</span>
+                    </div>
+                    <div>
+                      <b>{group.auto_refresh_enabled ? group.refresh_cadence : "manual"}</b>
+                      <span>refresh</span>
+                    </div>
+                  </div>
+                  <small>
+                    Data: {group.last_data_date || "waiting"} · Last refresh:{" "}
+                    {group.last_refreshed_at
+                      ? new Date(group.last_refreshed_at).toLocaleString("en-GB")
+                      : "never"}
+                  </small>
+                  {group.last_error ? <p>{group.last_error}</p> : null}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       <section className="panel">
         <div className="panelHeader">
           <div>
-            <h2>Tracked keywords</h2>
+            <h2>
+              {selectedGroup ? selectedGroup.name : "Tracked keywords"}
+            </h2>
             <p>
               Position is an exact configured SERP snapshot. “Not found” means the
               project domain did not appear inside that keyword’s monitored depth.
@@ -501,9 +606,9 @@ export default async function RankTrackerPage({
           </form>
         </div>
 
-        {enriched.length ? (
+        {visibleKeywords.length ? (
           <div className="rankKeywordList">
-            {enriched.map((keyword) => (
+            {visibleKeywords.map((keyword) => (
               <article
                 className={keyword.active ? "rankKeywordCard" : "rankKeywordCard inactive"}
                 key={keyword.id}
@@ -629,8 +734,14 @@ export default async function RankTrackerPage({
           </div>
         ) : (
           <div className="emptyState">
-            <strong>No tracked keywords yet</strong>
-            <span>Add keywords manually or seed a cost-controlled set from the GSC warehouse.</span>
+            <strong>
+              {selectedGroup ? "No keywords in this group yet" : "No tracked keywords yet"}
+            </strong>
+            <span>
+              {selectedGroup
+                ? "This group is waiting for GSC data or its next refresh."
+                : "Add keywords manually or seed a cost-controlled set from the GSC warehouse."}
+            </span>
           </div>
         )}
       </section>
