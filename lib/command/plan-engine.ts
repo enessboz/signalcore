@@ -289,7 +289,7 @@ export async function resumeReadyCommandPlans(input: {
 }) {
   const { data: plans, error: plansError } = await input.client
     .from("command_plans")
-    .select("id,owner_id,status,current_step,total_steps")
+    .select("id,thread_id,title,owner_id,status,current_step,total_steps")
     .eq("status", "planned")
     .order("updated_at", { ascending: true })
     .limit(Math.min(Math.max(input.maxPlans || 5, 1), 25));
@@ -320,6 +320,7 @@ export async function resumeReadyCommandPlans(input: {
     const pending = (steps || []).filter((step) => step.status === "pending");
     let finalStatus: PlanStatus = pending.length ? "running" : "completed";
     let completedNow = 0;
+    const completionSummaries: string[] = [];
 
     for (const step of pending) {
       const action =
@@ -397,6 +398,7 @@ export async function resumeReadyCommandPlans(input: {
 
       if (actual.status === "completed" || actual.status === "skipped") {
         completedNow += 1;
+        if (actual.summary) completionSummaries.push(actual.summary);
         await input.client
           .from("command_plan_steps")
           .update({
@@ -487,17 +489,48 @@ export async function resumeReadyCommandPlans(input: {
     }
 
     if (finalStatus === "completed") {
+      const completedAt = new Date().toISOString();
       await input.client
         .from("command_plans")
         .update({
           status: "completed",
           current_step: plan.total_steps,
           last_error: null,
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          completed_at: completedAt,
+          updated_at: completedAt,
         })
         .eq("id", plan.id)
         .eq("owner_id", plan.owner_id);
+
+      if (completedNow > 0 && plan.thread_id) {
+        const body =
+          "✅ Background work completed: " +
+          (plan.title || "SignalCore work plan") +
+          (completionSummaries.length
+            ? "\n\n" +
+              completionSummaries
+                .map((summary) => "• " + summary)
+                .join("\n")
+            : "");
+
+        await input.client.from("command_messages").insert({
+          thread_id: plan.thread_id,
+          owner_id: plan.owner_id,
+          role: "assistant",
+          content: body,
+          metadata: {
+            background_completion: true,
+            plan_id: plan.id,
+            completed_at: completedAt,
+          },
+        });
+
+        await input.client
+          .from("command_threads")
+          .update({ updated_at: completedAt })
+          .eq("id", plan.thread_id)
+          .eq("owner_id", plan.owner_id);
+      }
     }
 
     summaries.push({
