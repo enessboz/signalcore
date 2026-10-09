@@ -6,6 +6,7 @@ import { acquireRuntimeLease } from "@/lib/runtime/lease";
 import { recoverStaleScheduledTasks } from "@/lib/runtime/recovery";
 import { createReportingOutput, type OutputFormat } from "@/lib/outputs/reporting";
 import { finishRuntimeWorkerRun, startRuntimeWorkerRun, summarizeWorkerStatus } from "@/lib/runtime/worker-runs";
+import { resumeReadyCommandPlans } from "@/lib/command/plan-engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -25,12 +26,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY is not configured." },
-      { status: 503 },
-    );
-  }
+  const openAiReady = Boolean(process.env.OPENAI_API_KEY);
 
   const supabase = createAdminClient();
   const lease = await acquireRuntimeLease({
@@ -48,6 +44,11 @@ export async function POST(request: NextRequest) {
   }
 
   const recoveredStaleTasks = await recoverStaleScheduledTasks(supabase);
+  const resumedPlans = await resumeReadyCommandPlans({
+    client: supabase,
+    maxPlans: 5,
+  });
+
   const { data: tasks, error } = await supabase
     .from("scheduled_tasks")
     .select("id,owner_id,project_id,title,instruction,target_agent_key,schedule_kind,schedule_config,post_run_config,timezone,status,last_run_at,failure_count")
@@ -63,19 +64,25 @@ export async function POST(request: NextRequest) {
     client: supabase,
     workerKey: "agent-scheduler",
     ownerIds: (tasks || []).map((item) => item.owner_id),
-    metadata: { tasks_checked: tasks?.length || 0 },
+    metadata: {
+      tasks_checked: tasks?.length || 0,
+      ready_plans_resumed: resumedPlans.length,
+      openai_ready: openAiReady,
+    },
   });
 
   const now = new Date();
-  const due = (tasks || []).filter((task) =>
-    isScheduleDue({
+  const due = openAiReady
+    ? (tasks || []).filter((task) =>
+        isScheduleDue({
       scheduleKind: task.schedule_kind as ScheduleKind,
       scheduleConfig: (task.schedule_config || {}) as ScheduleConfig,
       timezone: task.timezone || "Europe/Istanbul",
       lastRunAt: task.last_run_at,
-      now,
-    }),
-  );
+          now,
+        }),
+      )
+    : [];
 
   const results: Array<Record<string, unknown>> = [];
 
@@ -217,6 +224,14 @@ export async function POST(request: NextRequest) {
     }),
     metrics: {
       recovered_stale_tasks: recoveredStaleTasks,
+      ready_plans_resumed: resumedPlans.length,
+      plans_completed: resumedPlans.filter((item) => item.status === "completed").length,
+      plans_blocked: resumedPlans.filter((item) =>
+        ["waiting_data", "waiting_user", "blocked_tool", "failed"].includes(
+          String(item.status),
+        ),
+      ).length,
+      openai_ready: openAiReady,
       checked: tasks?.length || 0,
       due: due.length,
       processed: results.length,
@@ -227,6 +242,8 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     recovered_stale_tasks: recoveredStaleTasks,
+    resumed_plans: resumedPlans,
+    openai_ready: openAiReady,
     checked: tasks?.length || 0,
     due: due.length,
     processed: results.length,
