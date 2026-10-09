@@ -100,61 +100,93 @@ async function warehouseWindowReady(input: {
   projectId: string;
   days: number;
 }) {
-  const [{ data: oldest }, { data: newest }, { data: syncState }] =
-    await Promise.all([
-      input.client
-        .from("gsc_query_daily")
-        .select("date")
-        .eq("project_id", input.projectId)
-        .order("date", { ascending: true })
-        .limit(1)
-        .maybeSingle(),
-      input.client
-        .from("gsc_query_daily")
-        .select("date")
-        .eq("project_id", input.projectId)
-        .order("date", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      input.client
-        .from("google_sync_states")
-        .select("status,last_complete_date,last_success_at,last_error")
-        .eq("project_id", input.projectId)
-        .eq("source", "gsc")
-        .eq("dataset", "query_daily")
-        .maybeSingle(),
-    ]);
+  const { data: latestLog, error: latestError } = await input.client
+    .from("google_sync_date_log")
+    .select("date")
+    .eq("project_id", input.projectId)
+    .eq("source", "gsc")
+    .eq("status", "succeeded")
+    .order("date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (!oldest?.date || !newest?.date) {
+  if (latestError) {
+    throw new Error("GSC sync coverage could not be checked: " + latestError.message);
+  }
+
+  if (!latestLog?.date) {
+    const { data: syncState } = await input.client
+      .from("google_sync_states")
+      .select("status,last_complete_date,last_success_at,last_error")
+      .eq("project_id", input.projectId)
+      .eq("source", "gsc")
+      .eq("dataset", "query_daily")
+      .maybeSingle();
+
     return {
       ready: false as const,
-      reason: "GSC query warehouse has no rows yet.",
-      oldestDate: oldest?.date || null,
-      newestDate: newest?.date || null,
+      reason: "GSC warehouse has no completed sync days yet.",
+      oldestDate: null as string | null,
+      newestDate: null as string | null,
+      coverageDays: 0,
       syncState: syncState || null,
     };
   }
 
-  const spanDays = dayDiff(oldest.date, newest.date) + 1;
-  if (spanDays < input.days) {
+  const newestDate = String(latestLog.date);
+  const startDate = new Date(newestDate + "T00:00:00Z");
+  startDate.setUTCDate(startDate.getUTCDate() - (input.days - 1));
+  const oldestRequired = startDate.toISOString().slice(0, 10);
+
+  const { data: coverageRows, error: coverageError } = await input.client
+    .from("google_sync_date_log")
+    .select("date")
+    .eq("project_id", input.projectId)
+    .eq("source", "gsc")
+    .eq("status", "succeeded")
+    .gte("date", oldestRequired)
+    .lte("date", newestDate)
+    .order("date", { ascending: true })
+    .limit(500);
+
+  if (coverageError) {
+    throw new Error("GSC sync coverage could not be loaded: " + coverageError.message);
+  }
+
+  const distinctDates = new Set((coverageRows || []).map((row) => String(row.date)));
+  const coverageDays = distinctDates.size;
+
+  const { data: syncState } = await input.client
+    .from("google_sync_states")
+    .select("status,last_complete_date,last_success_at,last_error")
+    .eq("project_id", input.projectId)
+    .eq("source", "gsc")
+    .eq("dataset", "query_daily")
+    .maybeSingle();
+
+  if (coverageDays < input.days) {
     return {
       ready: false as const,
       reason:
-        "GSC query warehouse currently spans " +
-        spanDays +
-        " day(s); " +
+        "GSC warehouse has " +
+        coverageDays +
+        " completed day(s) inside the requested " +
         input.days +
-        " day(s) are required.",
-      oldestDate: oldest.date,
-      newestDate: newest.date,
+        "-day window.",
+      oldestDate: distinctDates.size
+        ? Array.from(distinctDates).sort()[0] || null
+        : null,
+      newestDate,
+      coverageDays,
       syncState: syncState || null,
     };
   }
 
   return {
     ready: true as const,
-    oldestDate: oldest.date,
-    newestDate: newest.date,
+    oldestDate: oldestRequired,
+    newestDate,
+    coverageDays,
     syncState: syncState || null,
   };
 }
